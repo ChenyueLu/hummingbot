@@ -1,14 +1,13 @@
 import hashlib
 import hmac
-import time
+import json
 from collections import OrderedDict
-from typing import Any, Dict, Optional
+from typing import Dict
 from urllib.parse import urlencode
 
-import hummingbot.connector.exchange.bybit.bybit_constants as CONSTANTS
 from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.web_assistant.auth import AuthBase
-from hummingbot.core.web_assistant.connections.data_types import RESTRequest, WSRequest
+from hummingbot.core.web_assistant.connections.data_types import RESTMethod, RESTRequest, WSRequest
 
 
 class BybitAuth(AuthBase):
@@ -16,6 +15,7 @@ class BybitAuth(AuthBase):
     def __init__(self, api_key: str, secret_key: str, time_provider: TimeSynchronizer):
         self.api_key = api_key
         self.secret_key = secret_key
+        self.recv_window = 5000
         self.time_provider = time_provider
 
     @staticmethod
@@ -28,11 +28,18 @@ class BybitAuth(AuthBase):
         the required parameter in the request header.
         :param request: the request to be configured for authenticated interaction
         """
-        request.params = self.add_auth_to_params(params=request.params)
-        headers = {}
+        # Get payload
+        if request.method == RESTMethod.POST:
+            payload = json.dumps(request.data)
+        else:
+            payload = urlencode(request.params or {})
+
+        # Update headers with authentication fields
+        headers = self.add_auth_to_header(payload)
         if request.headers is not None:
             headers.update(request.headers)
         request.headers = headers
+
         return request
 
     async def ws_authenticate(self, request: WSRequest) -> WSRequest:
@@ -42,46 +49,44 @@ class BybitAuth(AuthBase):
         """
         return request  # pass-through
 
-    def get_referral_code_headers(self):
-        """
-        Generates authentication headers required by ByBit
-        :return: a dictionary of auth headers
-        """
-        headers = {
-            "referer": CONSTANTS.HBOT_BROKER_ID
-        }
-        return headers
-
-    def add_auth_to_params(self,
-                           params: Optional[Dict[str, Any]]):
+    def add_auth_to_header(self, payload_str: str):
         timestamp = int(self.time_provider.time() * 1e3)
-        request_params = params or {}
-        request_params["timestamp"] = timestamp
-        request_params["api_key"] = self.api_key
-        request_params = self.keysort(request_params)
-        signature = self._generate_signature(params=request_params)
-        request_params["sign"] = signature
-        return request_params
 
-    def _generate_signature(self, params: Dict[str, Any]) -> str:
-        encoded_params_str = urlencode(params)
-        digest = hmac.new(self.secret_key.encode("utf8"), encoded_params_str.encode("utf8"), hashlib.sha256).hexdigest()
-        return digest
+        # Generate signature
+        params_str = str(timestamp) + self.api_key + str(self.recv_window) + payload_str
+        signature = hmac.new(
+            self.secret_key.encode("utf-8"),
+            params_str.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+
+        # Form headers
+        headers = {
+            'X-BAPI-TIMESTAMP': str(timestamp),
+            'X-BAPI-API-KEY': self.api_key,
+            'X-BAPI-RECV-WINDOW': str(self.recv_window),
+            'X-BAPI-SIGN': signature,
+        }
+
+        return headers
 
     def generate_ws_authentication_message(self):
         """
         Generates the authentication message to start receiving messages from
-        the 3 private ws channels
+        the private ws channels
         """
+        # Generate expires
         expires = int((self.time_provider.time() + 10) * 1e3)
+
+        # Generate signature
         _val = f'GET/realtime{expires}'
-        signature = hmac.new(self.secret_key.encode("utf8"),
-                             _val.encode("utf8"), hashlib.sha256).hexdigest()
+        signature = hmac.new(
+            self.secret_key.encode("utf8"),
+            _val.encode("utf8"),
+            hashlib.sha256
+        ).hexdigest()
         auth_message = {
             "op": "auth",
             "args": [self.api_key, expires, signature]
         }
         return auth_message
-
-    def _time(self):
-        return time.time()
