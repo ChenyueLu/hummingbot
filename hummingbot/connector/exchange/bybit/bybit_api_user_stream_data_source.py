@@ -9,7 +9,7 @@ from hummingbot.connector.exchange.bybit.bybit_auth import BybitAuth
 from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
-from hummingbot.core.web_assistant.connections.data_types import WSJSONRequest
+from hummingbot.core.web_assistant.connections.data_types import WSJSONRequest, WSResponse
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 from hummingbot.core.web_assistant.ws_assistant import WSAssistant
 from hummingbot.logger import HummingbotLogger
@@ -17,7 +17,7 @@ from hummingbot.logger import HummingbotLogger
 
 class BybitAPIUserStreamDataSource(UserStreamTrackerDataSource):
 
-    HEARTBEAT_TIME_INTERVAL = 30.0
+    HEARTBEAT_TIME_INTERVAL = 20.0
 
     _bausds_logger: Optional[HummingbotLogger] = None
 
@@ -70,6 +70,7 @@ class BybitAPIUserStreamDataSource(UserStreamTrackerDataSource):
                 ws: WSAssistant = await self._get_ws_assistant()
                 await ws.connect(ws_url=CONSTANTS.WSS_PRIVATE_URL[self._domain])
                 await self._authenticate_connection(ws)
+                await self._subscribe_to_channels(ws)
                 self._last_ws_message_sent_timestamp = self._time()
                 while True:
                     try:
@@ -80,7 +81,7 @@ class BybitAPIUserStreamDataSource(UserStreamTrackerDataSource):
                     except asyncio.TimeoutError:
                         ping_time = self._time()
                         payload = {
-                            "ping": int(ping_time * 1e3)
+                            "op": "ping"
                         }
                         ping_request = WSJSONRequest(payload=payload)
                         await ws.send(request=ping_request)
@@ -101,16 +102,50 @@ class BybitAPIUserStreamDataSource(UserStreamTrackerDataSource):
         """
         auth_message: WSJSONRequest = WSJSONRequest(payload=self._auth.generate_ws_authentication_message())
         await ws.send(auth_message)
+        response: WSResponse = await ws.receive()
+        message = response.data
+
+        if (
+            message["success"] is not True
+            or message["op"] != "auth"
+        ):
+            self.logger().error("Error authenticating the private websocket connection")
+            raise IOError("Private websocket connection authentication failed")
+
+    async def _subscribe_to_channels(self, ws: WSAssistant):
+        try:
+            payload = {
+                "op": "subscribe",
+                "args": [f"{CONSTANTS.WS_EXECUTION_TOPIC}"],
+            }
+            subscribe_executions_request = WSJSONRequest(payload)
+            payload = {
+                "op": "subscribe",
+                "args": [f"{CONSTANTS.WS_WALLET_TOPIC}"],
+            }
+            subscribe_wallet_request = WSJSONRequest(payload)
+
+            await ws.send(subscribe_executions_request)
+            await ws.send(subscribe_wallet_request)
+
+            self.logger().info(
+                f"Subscribed to private account and orders channels "
+                f"{[CONSTANTS.WS_EXECUTION_TOPIC, CONSTANTS.WS_WALLET_TOPIC]}..."
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.logger().exception(
+                f"Unexpected error occurred subscribing to order book trading and delta streams "
+                f"{[CONSTANTS.WS_EXECUTION_TOPIC, CONSTANTS.WS_WALLET_TOPIC]}..."
+            )
+            raise
 
     async def _process_ws_messages(self, ws: WSAssistant, output: asyncio.Queue):
         async for ws_response in ws.iter_messages():
             data = ws_response.data
-            if isinstance(data, list):
-                for message in data:
-                    if message["e"] in ["executionReport", "outboundAccountInfo"]:
-                        output.put_nowait(message)
-            elif data.get("auth") == "fail":
-                raise IOError("Private channel authentication failed.")
+            if data["topic"] in {CONSTANTS.WS_EXECUTION_TOPIC, CONSTANTS.WS_WALLET_TOPIC}:
+                output.put_nowait(data)
 
     async def _get_ws_assistant(self) -> WSAssistant:
         if self._ws_assistant is None:
