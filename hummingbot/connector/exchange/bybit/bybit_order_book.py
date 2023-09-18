@@ -82,7 +82,7 @@ class BybitOrderBook(OrderBook):
         """
         if metadata:
             msg.update(metadata)
-        ts = msg["ts"]
+        ts = msg["T"] * 1e-3
         return OrderBookMessage(OrderBookMessageType.TRADE, {
             "trading_pair": msg["trading_pair"],
             "trade_type": float(TradeType.BUY.value) if msg["S"] == "Buy" else float(TradeType.SELL.value),
