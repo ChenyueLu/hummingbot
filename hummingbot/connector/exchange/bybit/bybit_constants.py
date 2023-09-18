@@ -21,9 +21,13 @@ WSS_PUBLIC_URL = {"bybit_main": "wss://stream.bybit.com/v5/public/spot",
 WSS_PRIVATE_URL = {"bybit_main": "wss://stream.bybit.com/v5/private",
                    "bybit_testnet": "wss://stream-testnet.bybit.com/v5/private"}
 
-# Websocket topics
+# Websocket public topics
 WS_ORDERBOOK_TOPIC = "orderbook"
 WS_TRADE_TOPIC = "publicTrade"
+
+# Websocket private topics
+WS_EXECUTION_TOPIC = "execution"
+WS_WALLET_TOPIC = "wallet"
 
 # Websocket event types
 DIFF_EVENT_TYPE = "delta"
