@@ -15,16 +15,20 @@ TIME_IN_FORCE_GTC = "GTC"
 REST_URLS = {"bybit_main": "https://api.bybit.com",
              "bybit_testnet": "https://api-testnet.bybit.com"}
 
-WSS_V1_PUBLIC_URL = {"bybit_main": "wss://stream.bybit.com/spot/quote/ws/v1",
-                     "bybit_testnet": "wss://stream-testnet.bybit.com/spot/quote/ws/v1"}
+WSS_PUBLIC_URL = {"bybit_main": "wss://stream.bybit.com/v5/public/spot",
+                  "bybit_testnet": "wss://stream-testnet.bybit.com/v5/public/spot"}
 
-WSS_PRIVATE_URL = {"bybit_main": "wss://stream.bybit.com/spot/ws",
-                   "bybit_testnet": "wss://stream-testnet.bybit.com/spot/ws"}
+WSS_PRIVATE_URL = {"bybit_main": "wss://stream.bybit.com/v5/private",
+                   "bybit_testnet": "wss://stream-testnet.bybit.com/v5/private"}
+
+# Websocket topics
+WS_ORDERBOOK_TOPIC = "orderbook"
+WS_TRADE_TOPIC = "publicTrade"
 
 # Websocket event types
-DIFF_EVENT_TYPE = "diffDepth"
+DIFF_EVENT_TYPE = "delta"
 TRADE_EVENT_TYPE = "trade"
-SNAPSHOT_EVENT_TYPE = "depth"
+SNAPSHOT_EVENT_TYPE = "snapshot"
 
 # Public API endpoints
 LAST_TRADED_PRICE_PATH = "/spot/quote/v1/ticker/price"
@@ -48,7 +52,7 @@ ORDER_STATE = {
     "REJECTED": OrderState.FAILED,
 }
 
-WS_HEARTBEAT_TIME_INTERVAL = 30
+WS_HEARTBEAT_TIME_INTERVAL = 20
 
 # Rate Limit Type
 SHARED_LIMIT = "SHARED"
@@ -71,6 +75,10 @@ RATE_LIMITS = {
     # TODO: fill in other API limits
     RateLimit(
         limit_id=SERVER_TIME_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+    RateLimit(
+        limit_id=SNAPSHOT_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
         linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
     ),
 
