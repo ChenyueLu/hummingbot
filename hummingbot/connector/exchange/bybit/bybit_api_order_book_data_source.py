@@ -151,7 +151,7 @@ class BybitAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 while True:
                     try:
                         seconds_until_next_ping = (CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL - (
-                            self._time() - self._last_ws_messƒage_sent_timestamp))
+                            self._time() - self._last_ws_message_sent_timestamp))
                         await asyncio.wait_for(self._process_ws_messages(ws=ws), timeout=seconds_until_next_ping)
                     except asyncio.TimeoutError:
                         ping_time = self._time()
