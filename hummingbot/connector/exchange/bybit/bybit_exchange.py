@@ -50,7 +50,7 @@ class BybitExchange(ExchangePyBase):
 
     @staticmethod
     def bybit_order_type(order_type: OrderType) -> str:
-        return order_type.name.upper()
+        return order_type.name.capitalize()
 
     @staticmethod
     def to_hb_order_type(bybit_type: str) -> OrderType:
@@ -88,15 +88,29 @@ class BybitExchange(ExchangePyBase):
 
     @property
     def trading_rules_request_path(self):
-        return CONSTANTS.EXCHANGE_INFO_PATH_URL
+        return CONSTANTS.INSTRUMENTS_INFO_PATH_URL
 
     @property
     def trading_pairs_request_path(self):
-        return CONSTANTS.EXCHANGE_INFO_PATH_URL
+        return CONSTANTS.INSTRUMENTS_INFO_PATH_URL
 
     @property
     def check_network_request_path(self):
         return CONSTANTS.SERVER_TIME_PATH_URL
+
+    async def _make_trading_rules_request(self) -> Any:
+        exchange_info = await self._api_get(
+            path_url=self.trading_rules_request_path,
+            params={"category": "spot"},
+        )
+        return exchange_info
+
+    async def _make_trading_pairs_request(self) -> Any:
+        exchange_info = await self._api_get(
+            path_url=self.trading_rules_request_path,
+            params={"category": "spot"},
+        )
+        return exchange_info
 
     @property
     def trading_pairs(self):
@@ -119,14 +133,16 @@ class BybitExchange(ExchangePyBase):
                                         and "Timestamp for the request" in error_description)
         return is_time_synchronizer_related
 
-    def _is_order_not_found_during_status_update_error(self, status_update_exception: Exception) -> bool:
+    def _is_order_not_found_during_status_update_error(self,
+                                                       status_update_exception: Exception) -> bool:
         # TODO: implement this method correctly for the connector
         # The default implementation was added when the functionality to detect not found orders was introduced in the
         # ExchangePyBase class. Also fix the unit test test_lost_order_removed_if_not_found_during_order_status_update
         # when replacing the dummy implementation
         return False
 
-    def _is_order_not_found_during_cancelation_error(self, cancelation_exception: Exception) -> bool:
+    def _is_order_not_found_during_cancelation_error(self,
+                                                     cancelation_exception: Exception) -> bool:
         # TODO: implement this method correctly for the connector
         # The default implementation was added when the functionality to detect not found orders was introduced in the
         # ExchangePyBase class. Also fix the unit test test_cancel_order_not_found_in_the_exchange when replacing the
@@ -192,18 +208,21 @@ class BybitExchange(ExchangePyBase):
 
         side_str = CONSTANTS.SIDE_BUY if trade_type is TradeType.BUY else CONSTANTS.SIDE_SELL
         symbol = await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
-        api_params = {"symbol": symbol,
-                      "side": side_str,
-                      "qty": amount_str,
-                      "type": type_str,
-                      "orderLinkId": order_id}
+        api_params = {
+            "category": "spot",
+            "symbol": symbol,
+            "side": side_str,
+            "qty": amount_str,
+            "type": type_str,
+            "orderLinkId": order_id,
+        }
         if order_type != OrderType.MARKET:
             api_params["price"] = f"{price:f}"
         if order_type == OrderType.LIMIT:
             api_params["timeInForce"] = CONSTANTS.TIME_IN_FORCE_GTC
 
         order_result = await self._api_post(
-            path_url=CONSTANTS.ORDER_PATH_URL,
+            path_url=CONSTANTS.ORDER_CREATE_PATH_URL,
             params=api_params,
             is_auth_required=True,
             trading_pair=trading_pair,
@@ -211,19 +230,27 @@ class BybitExchange(ExchangePyBase):
         )
 
         o_id = str(order_result["result"]["orderId"])
-        transact_time = int(order_result["result"]["transactTime"]) * 1e-3
+        transact_time = int(order_result["time"]) * 1e-3
         return (o_id, transact_time)
 
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder):
-        api_params = {}
+        symbol = await self.exchange_symbol_associated_to_pair(
+            trading_pair=tracked_order.trading_pair
+        )
+
+        api_params = {
+            "category": "spot",
+            "symbol": symbol,
+        }
         if tracked_order.exchange_order_id:
             api_params["orderId"] = tracked_order.exchange_order_id
         else:
             api_params["orderLinkId"] = tracked_order.client_order_id
-        cancel_result = await self._api_delete(
-            path_url=CONSTANTS.ORDER_PATH_URL,
+        cancel_result = await self._api_post(
+            path_url=CONSTANTS.ORDER_CANCEL_PATH_URL,
             params=api_params,
-            is_auth_required=True)
+            is_auth_required=True,
+        )
 
         if isinstance(cancel_result, dict) and "orderLinkId" in cancel_result["result"]:
             return True
@@ -269,26 +296,34 @@ class BybitExchange(ExchangePyBase):
             ]
         }
         """
-        trading_pair_rules = exchange_info_dict.get("result", [])
+        trading_pair_rules = exchange_info_dict.get("result", {}).get("list", [])
         retval = []
         for rule in trading_pair_rules:
             try:
-                trading_pair = await self.trading_pair_associated_to_exchange_symbol(symbol=rule.get("name"))
+                trading_pair = await self.trading_pair_associated_to_exchange_symbol(
+                    symbol=rule.get("symbol"))
 
-                min_order_size = rule.get("minTradeQuantity")
-                min_price_increment = rule.get("minPricePrecision")
-                min_base_amount_increment = rule.get("basePrecision")
-                min_notional_size = rule.get("minTradeAmount")
+                size_attrs = rule.get("lotSizeFilter")
+                min_order_size = size_attrs.get("minOrderQty")
+                max_order_size = size_attrs.get("maxOrderQty")
+                min_quote_amount_increment = size_attrs.get("quotePrecision")
+                min_base_amount_increment = size_attrs.get("basePrecision")
+                min_notional_size = size_attrs.get("minOrderAmt")
 
                 retval.append(
-                    TradingRule(trading_pair,
-                                min_order_size=Decimal(min_order_size),
-                                min_price_increment=Decimal(min_price_increment),
-                                min_base_amount_increment=Decimal(min_base_amount_increment),
-                                min_notional_size=Decimal(min_notional_size)))
+                    TradingRule(
+                        trading_pair,
+                        min_order_size=Decimal(min_order_size),
+                        max_order_size=Decimal(max_order_size),
+                        min_quote_amount_increment=Decimal(min_quote_amount_increment),
+                        min_base_amount_increment=Decimal(min_base_amount_increment),
+                        min_notional_size=Decimal(min_notional_size),
+                    ),
+                )
 
             except Exception:
-                self.logger().exception(f"Error parsing the trading pair rule {rule.get('name')}. Skipping.")
+                self.logger().exception(
+                    f"Error parsing the trading pair rule {rule.get('name')}. Skipping.")
         return retval
 
     async def _update_trading_fees(self):
@@ -305,48 +340,75 @@ class BybitExchange(ExchangePyBase):
         """
         async for event_message in self._iter_user_event_queue():
             try:
-                event_type = event_message.get("e")
-                if event_type == "executionReport":
-                    execution_type = event_message.get("X")
-                    client_order_id = event_message.get("c")
+                topic = event_message.get("topic")
+
+                if topic == CONSTANTS.WS_EXECUTION_TOPIC:
+                    client_order_id = event_message.get("orderLinkId")
                     tracked_order = self._order_tracker.fetch_order(client_order_id=client_order_id)
                     if tracked_order is not None:
-                        if execution_type in ["PARTIALLY_FILLED", "FILLED"]:
-                            fee = TradeFeeBase.new_spot_fee(
-                                fee_schema=self.trade_fee_schema(),
-                                trade_type=tracked_order.trade_type,
-                                flat_fees=[TokenAmount(amount=Decimal(event_message["n"]), token=event_message["N"])]
-                            )
-                            trade_update = TradeUpdate(
-                                trade_id=str(event_message["t"]),
-                                client_order_id=client_order_id,
-                                exchange_order_id=str(event_message["i"]),
-                                trading_pair=tracked_order.trading_pair,
-                                fee=fee,
-                                fill_base_amount=Decimal(event_message["l"]),
-                                fill_quote_amount=Decimal(event_message["l"]) * Decimal(event_message["L"]),
-                                fill_price=Decimal(event_message["L"]),
-                                fill_timestamp=int(event_message["E"]) * 1e-3,
-                            )
-                            self._order_tracker.process_trade_update(trade_update)
+                        fills_data = event_message.get("data", [])
+                        if fills_data is not None:
+                            for fill_data in fills_data:
+                                exchange_order_id = str(fill_data["orderId"])
+                                fee_asset = tracked_order.quote_asset
+                                fee_amount = Decimal(fill_data["execFee"])
 
-                        order_update = OrderUpdate(
-                            trading_pair=tracked_order.trading_pair,
-                            update_timestamp=int(event_message["E"]) * 1e-3,
-                            new_state=CONSTANTS.ORDER_STATE[event_message["X"]],
-                            client_order_id=client_order_id,
-                            exchange_order_id=str(event_message["i"]),
-                        )
-                        self._order_tracker.process_order_update(order_update=order_update)
+                                flat_fees = [] if fee_amount == Decimal("0") else [
+                                    TokenAmount(amount=fee_amount, token=fee_asset)
+                                ]
 
-                elif event_type == "outboundAccountInfo":
-                    balances = event_message["B"]
-                    for balance_entry in balances:
-                        asset_name = balance_entry["a"]
-                        free_balance = Decimal(balance_entry["f"])
-                        total_balance = Decimal(balance_entry["f"]) + Decimal(balance_entry["l"])
-                        self._account_available_balances[asset_name] = free_balance
-                        self._account_balances[asset_name] = total_balance
+                                fee = TradeFeeBase.new_spot_fee(
+                                    fee_schema=self.trade_fee_schema(),
+                                    trade_type=tracked_order.trade_type,
+                                    percent_token=fee_asset,
+                                    flat_fees=flat_fees,
+                                )
+
+                                trade_id = str(fill_data["execId"])
+
+                                trade_update = TradeUpdate(
+                                    trade_id=trade_id,
+                                    client_order_id=client_order_id,
+                                    exchange_order_id=exchange_order_id,
+                                    trading_pair=tracked_order.trading_pair,
+                                    fee=fee,
+                                    fill_base_amount=Decimal(fill_data["execQty"]),
+                                    fill_quote_amount=Decimal(fill_data["execPrice"]) * Decimal(
+                                        fill_data["execQty"]),
+                                    fill_price=Decimal(fill_data["execPrice"]),
+                                    fill_timestamp=int(fill_data["execTime"]) * 1e-3,
+                                )
+                                self._order_tracker.process_trade_update(trade_update)
+
+                elif topic == CONSTANTS.WS_ORDER_TOPIC:
+                    client_order_id = event_message.get("orderLinkId")
+                    tracked_order = self._order_tracker.fetch_order(client_order_id=client_order_id)
+
+                    if tracked_order is not None:
+                        orders_data = event_message.get("data", [])
+                        if orders_data is not None:
+                            for order_data in orders_data:
+                                new_state = CONSTANTS.ORDER_STATE[order_data["orderStatus"]]
+
+                                order_update = OrderUpdate(
+                                    client_order_id=tracked_order.client_order_id,
+                                    exchange_order_id=str(order_data["orderId"]),
+                                    trading_pair=tracked_order.trading_pair,
+                                    update_timestamp=int(order_data["updatedTime"]) * 1e-3,
+                                    new_state=new_state,
+                                )
+                                self._order_tracker.process_order_update(order_update=order_update)
+
+                elif topic == CONSTANTS.WS_WALLET_TOPIC:
+                    wallets_data = event_message.get("data", [])
+                    for wallet_data in wallets_data:
+                        balances = wallet_data["coin"]
+                        for balance_entry in balances:
+                            asset_name = balance_entry["coin"]
+                            free_balance = Decimal(balance_entry["free"])
+                            total_balance = Decimal(balance_entry["walletBalance"])
+                            self._account_available_balances[asset_name] = free_balance
+                            self._account_balances[asset_name] = total_balance
 
             except asyncio.CancelledError:
                 raise
@@ -358,55 +420,79 @@ class BybitExchange(ExchangePyBase):
         trade_updates = []
 
         if order.exchange_order_id is not None:
-            exchange_order_id = int(order.exchange_order_id)
-            trading_pair = await self.exchange_symbol_associated_to_pair(trading_pair=order.trading_pair)
+            exchange_order_id = str(order.exchange_order_id)
+            trading_pair = await self.exchange_symbol_associated_to_pair(
+                trading_pair=order.trading_pair)
             all_fills_response = await self._api_get(
-                path_url=CONSTANTS.MY_TRADES_PATH_URL,
+                path_url=CONSTANTS.EXECUTION_HISTORY_PATH_URL,
                 params={
+                    "category": "spot",
                     "symbol": trading_pair,
-                    "orderId": exchange_order_id
+                    "orderId": exchange_order_id,
+                    "execType": "Trade"
                 },
                 is_auth_required=True,
-                limit_id=CONSTANTS.MY_TRADES_PATH_URL)
-            fills_data = all_fills_response.get("result", [])
+                limit_id=CONSTANTS.EXECUTION_HISTORY_PATH_URL,
+            )
+            fills_data = all_fills_response.get("result", {}).get("list", [])
             if fills_data is not None:
                 for trade in fills_data:
                     exchange_order_id = str(trade["orderId"])
+                    fee_asset = order.quote_asset
+                    fee_amount = Decimal(trade["execFee"])
+
+                    flat_fees = [] if fee_amount == Decimal("0") else [
+                        TokenAmount(amount=fee_amount, token=fee_asset)
+                    ]
+
                     fee = TradeFeeBase.new_spot_fee(
                         fee_schema=self.trade_fee_schema(),
                         trade_type=order.trade_type,
-                        percent_token=trade["commissionAsset"],
-                        flat_fees=[TokenAmount(amount=Decimal(trade["commission"]), token=trade["commissionAsset"])]
+                        percent_token=fee_asset,
+                        flat_fees=flat_fees,
                     )
+
+                    trade_id = str(trade["execId"])
+
                     trade_update = TradeUpdate(
-                        trade_id=str(trade["ticketId"]),
+                        trade_id=trade_id,
                         client_order_id=order.client_order_id,
                         exchange_order_id=exchange_order_id,
                         trading_pair=trading_pair,
                         fee=fee,
-                        fill_base_amount=Decimal(trade["qty"]),
-                        fill_quote_amount=Decimal(trade["price"]) * Decimal(trade["qty"]),
-                        fill_price=Decimal(trade["price"]),
-                        fill_timestamp=int(trade["executionTime"]) * 1e-3,
+                        fill_base_amount=Decimal(trade["execQty"]),
+                        fill_quote_amount=Decimal(trade["execPrice"]) * Decimal(trade["execQty"]),
+                        fill_price=Decimal(trade["execPrice"]),
+                        fill_timestamp=int(trade["execTime"]) * 1e-3,
                     )
                     trade_updates.append(trade_update)
 
         return trade_updates
 
     async def _request_order_status(self, tracked_order: InFlightOrder) -> OrderUpdate:
-        updated_order_data = await self._api_get(
-            path_url=CONSTANTS.ORDER_PATH_URL,
-            params={
-                "orderLinkId": tracked_order.client_order_id},
-            is_auth_required=True)
+        symbol = await self.exchange_symbol_associated_to_pair(
+            trading_pair=tracked_order.trading_pair,
+        )
 
-        new_state = CONSTANTS.ORDER_STATE[updated_order_data["result"]["status"]]
+        params = {
+            "category": "spot",
+            "symbol": symbol,
+            "orderLinkId": tracked_order.client_order_id
+        }
+        updated_order_data = await self._api_get(
+            path_url=CONSTANTS.ORDER_GET_PATH_URL,
+            params=params,
+            is_auth_required=True,
+        )
+
+        updated_order = updated_order_data["result"]["list"][0]
+        new_state = CONSTANTS.ORDER_STATE[updated_order["orderStatus"]]
 
         order_update = OrderUpdate(
             client_order_id=tracked_order.client_order_id,
-            exchange_order_id=str(updated_order_data["result"]["orderId"]),
+            exchange_order_id=str(updated_order["orderId"]),
             trading_pair=tracked_order.trading_pair,
-            update_timestamp=int(updated_order_data["result"]["updateTime"]) * 1e-3,
+            update_timestamp=int(updated_order["updatedTime"]) * 1e-3,
             new_state=new_state,
         )
 
@@ -418,13 +504,14 @@ class BybitExchange(ExchangePyBase):
 
         account_info = await self._api_request(
             method=RESTMethod.GET,
-            path_url=CONSTANTS.ACCOUNTS_PATH_URL,
+            path_url=CONSTANTS.WALLET_BALANCE_PATH_URL,
+            params={"accountType": "SPOT"},
             is_auth_required=True)
-        balances = account_info["result"]["balances"]
+        balances = account_info["result"]["list"][0]["coin"]
         for balance_entry in balances:
             asset_name = balance_entry["coin"]
             free_balance = Decimal(balance_entry["free"])
-            total_balance = Decimal(balance_entry["total"])
+            total_balance = Decimal(balance_entry["walletBalance"])
             self._account_available_balances[asset_name] = free_balance
             self._account_balances[asset_name] = total_balance
             remote_asset_names.add(asset_name)
@@ -436,22 +523,34 @@ class BybitExchange(ExchangePyBase):
 
     def _initialize_trading_pair_symbols_from_exchange_info(self, exchange_info: Dict[str, Any]):
         mapping = bidict()
-        for symbol_data in filter(bybit_utils.is_exchange_information_valid, exchange_info["result"]):
-            mapping[symbol_data["name"]] = combine_to_hb_trading_pair(base=symbol_data["baseCurrency"],
-                                                                      quote=symbol_data["quoteCurrency"])
+        for symbol_data in filter(bybit_utils.is_exchange_information_valid,
+                                  exchange_info["result"]["list"]):
+            mapping[symbol_data["symbol"]] = combine_to_hb_trading_pair(
+                base=symbol_data["baseCoin"],
+                quote=symbol_data["quoteCoin"])
         self._set_trading_pair_symbol_map(mapping)
 
     async def _get_last_traded_price(self, trading_pair: str) -> float:
+        exchange_symbol = await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
         params = {
-            "symbol": await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair),
+            "category": "spot",
+            "symbol": exchange_symbol,
         }
         resp_json = await self._api_request(
             method=RESTMethod.GET,
-            path_url=CONSTANTS.LAST_TRADED_PRICE_PATH,
+            path_url=CONSTANTS.TICKER_PATH_URL,
             params=params,
         )
 
-        return float(resp_json["result"]["price"])
+        price_list = resp_json.get("result", {}).get("list", [])
+        if len(price_list) < 1:
+            err_msg = f"Failed to get tickers for symbol {exchange_symbol}"
+            self.logger().error(err_msg)
+            raise Exception(err_msg)
+
+        price = float(resp_json["result"]["list"][0]["lastPrice"])
+
+        return price
 
     async def _api_request(self,
                            path_url,
@@ -483,7 +582,8 @@ class BybitExchange(ExchangePyBase):
                 return request_result
             except IOError as request_exception:
                 last_exception = request_exception
-                if self._is_request_exception_related_to_time_synchronizer(request_exception=request_exception):
+                if self._is_request_exception_related_to_time_synchronizer(
+                        request_exception=request_exception):
                     self._time_synchronizer.clear_time_offset_ms_samples()
                     await self._update_time_synchronizer()
                 else:

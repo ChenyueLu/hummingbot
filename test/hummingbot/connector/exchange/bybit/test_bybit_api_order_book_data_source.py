@@ -164,7 +164,7 @@ class TestBybitAPIOrderBookDataSource(unittest.TestCase):
         url = web_utils.rest_url(path_url=CONSTANTS.SNAPSHOT_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
         snapshot_data = self._snapshot_response()
-        tradingrule_url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
         tradingrule_resp = self.get_exchange_rules_mock()
         mock_api.get(tradingrule_url, body=json.dumps(tradingrule_resp))
         mock_api.get(regex_url, body=json.dumps(snapshot_data))
@@ -179,7 +179,7 @@ class TestBybitAPIOrderBookDataSource(unittest.TestCase):
     def test_get_snapshot_raises(self, mock_api):
         url = web_utils.rest_url(path_url=CONSTANTS.SNAPSHOT_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
-        tradingrule_url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
         tradingrule_resp = self.get_exchange_rules_mock()
         mock_api.get(tradingrule_url, body=json.dumps(tradingrule_resp))
         mock_api.get(regex_url, status=500)
