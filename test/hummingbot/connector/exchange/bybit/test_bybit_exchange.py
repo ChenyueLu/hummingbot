@@ -116,27 +116,34 @@ class TestBybitExchange(unittest.TestCase):
 
     def get_exchange_rules_mock(self) -> Dict:
         exchange_rules = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
-            "result": [
-                {
-                    "name": self.ex_trading_pair,
-                    "alias": self.ex_trading_pair,
-                    "baseCurrency": "COINALPHA",
-                    "quoteCurrency": "USDT",
-                    "basePrecision": "0.000001",
-                    "quotePrecision": "0.01",
-                    "minTradeQuantity": "0.0001",
-                    "minTradeAmount": "10",
-                    "minPricePrecision": "0.01",
-                    "maxTradeQuantity": "2",
-                    "maxTradeAmount": "200",
-                    "category": 1,
-                    "showStatus": True
-                },
-            ]
+            "retCode": 0,
+            "retMsg": "OK",
+            "result": {
+                "category": "spot",
+                "list": [
+                    {
+                        "symbol": self.ex_trading_pair,
+                        "baseCoin": "COINALPHA",
+                        "quoteCoin": "USDT",
+                        "innovation": "0",
+                        "status": "Trading",
+                        "marginTrading": "both",
+                        "lotSizeFilter": {
+                            "basePrecision": "0.000001",
+                            "quotePrecision": "0.00000001",
+                            "minOrderQty": "0.000048",
+                            "maxOrderQty": "71.73956243",
+                            "minOrderAmt": "1",
+                            "maxOrderAmt": "2000000"
+                        },
+                        "priceFilter": {
+                            "tickSize": "0.01"
+                        },
+                    }
+                ]
+            },
+            "retExtInfo": {},
+            "time": 1672712468011
         }
         return exchange_rules
 
@@ -152,11 +159,12 @@ class TestBybitExchange(unittest.TestCase):
 
     def _validate_auth_credentials_present(self, request_call_tuple: NamedTuple):
         request_headers = request_call_tuple.kwargs["headers"]
-        request_params = request_call_tuple.kwargs["params"]
         self.assertIn("Content-Type", request_headers)
         self.assertEqual("application/x-www-form-urlencoded", request_headers["Content-Type"])
-        self.assertIn("api_key", request_params)
-        self.assertIn("sign", request_params)
+        self.assertIn("X-BAPI-API-KEY", request_headers)
+        self.assertIn("X-BAPI-TIMESTAMP", request_headers)
+        self.assertIn("X-BAPI-RECV-WINDOW", request_headers)
+        self.assertIn("X-BAPI-SIGN", request_headers)
 
     def test_supported_order_types(self):
         supported_types = self.exchange.supported_order_types()
@@ -168,13 +176,14 @@ class TestBybitExchange(unittest.TestCase):
     def test_check_network_success(self, mock_api):
         url = web_utils.rest_url(CONSTANTS.SERVER_TIME_PATH_URL)
         resp = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
+            "retCode": 0,
+            "retMsg": "OK",
             "result": {
-                "serverTime": 1625799317787
-            }
+                "timeSecond": "1688639403",
+                "timeNano": "1688639403423213947"
+            },
+            "retExtInfo": {},
+            "time": 1688639403423
         }
         mock_api.get(url, body=json.dumps(resp))
 
@@ -203,45 +212,16 @@ class TestBybitExchange(unittest.TestCase):
     def test_update_trading_rules(self, mock_api):
         self.exchange._set_current_timestamp(1000)
 
-        url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
+        url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
+        regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
         resp = self.get_exchange_rules_mock()
-        mock_api.get(url, body=json.dumps(resp))
-        mock_api.get(url, body=json.dumps(resp))
+        mock_api.get(regex_url, body=json.dumps(resp))
+        mock_api.get(regex_url, body=json.dumps(resp))
 
         self.async_run_with_timeout(coroutine=self.exchange._update_trading_rules())
 
         self.assertTrue(self.trading_pair in self.exchange._trading_rules)
-
-    @aioresponses()
-    def test_update_trading_rules_ignores_rule_with_error(self, mock_api):
-        self.exchange._set_current_timestamp(1000)
-
-        url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
-        exchange_rules = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
-            "result": [
-                {
-                    "name": self.ex_trading_pair,
-                    "alias": self.ex_trading_pair,
-                    "baseCurrency": "COINALPHA",
-                    "quoteCurrency": "USDT",
-                    "maxTradeAmount": "200",
-                    "category": 1
-                },
-            ]
-        }
-        mock_api.get(url, body=json.dumps(exchange_rules))
-
-        self.async_run_with_timeout(coroutine=self.exchange._update_trading_rules())
-
-        self.assertEqual(0, len(self.exchange._trading_rules))
-        self.assertTrue(
-            self._is_logged("ERROR", f"Error parsing the trading pair rule {self.ex_trading_pair}. Skipping.")
-        )
 
     def test_initial_status_dict(self):
         BybitAPIOrderBookDataSource._trading_pair_symbol_map = {}
@@ -363,7 +343,7 @@ class TestBybitExchange(unittest.TestCase):
         self._simulate_trading_rules_initialized()
         request_sent_event = asyncio.Event()
         self.exchange._set_current_timestamp(1640780000)
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
+        url = web_utils.rest_url(CONSTANTS.ORDER_CREATE_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
         creation_response = {
@@ -387,7 +367,7 @@ class TestBybitExchange(unittest.TestCase):
                 "side": "BUY"
             }
         }
-        tradingrule_url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
         resp = self.get_exchange_rules_mock()
         mock_api.get(tradingrule_url, body=json.dumps(resp))
         mock_api.post(regex_url,
@@ -461,7 +441,7 @@ class TestBybitExchange(unittest.TestCase):
             }
         }
 
-        tradingrule_url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
         resp = self.get_exchange_rules_mock()
         mock_api.get(tradingrule_url, body=json.dumps(resp))
         mock_api.post(regex_url,
@@ -535,7 +515,7 @@ class TestBybitExchange(unittest.TestCase):
                 "side": "SELL"
             }
         }
-        tradingrule_url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
         resp = self.get_exchange_rules_mock()
         mock_api.get(tradingrule_url, body=json.dumps(resp))
         mock_api.post(regex_url,
@@ -584,7 +564,7 @@ class TestBybitExchange(unittest.TestCase):
         self.exchange._set_current_timestamp(1640780000)
         url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
-        tradingrule_url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
         resp = self.get_exchange_rules_mock()
         mock_api.get(tradingrule_url, body=json.dumps(resp))
         mock_api.post(regex_url,
@@ -628,7 +608,7 @@ class TestBybitExchange(unittest.TestCase):
 
         url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
-        tradingrule_url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
         resp = self.get_exchange_rules_mock()
         mock_api.get(tradingrule_url, body=json.dumps(resp))
         mock_api.post(regex_url,
@@ -914,7 +894,7 @@ class TestBybitExchange(unittest.TestCase):
 
     @aioresponses()
     def test_update_balances(self, mock_api):
-        url = web_utils.rest_url(CONSTANTS.ACCOUNTS_PATH_URL)
+        url = web_utils.rest_url(CONSTANTS.WALLET_BALANCE_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
         response = {

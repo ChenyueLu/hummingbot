@@ -7,8 +7,8 @@ HBOT_ORDER_ID_PREFIX = "BYBIT-"
 MAX_ORDER_ID_LEN = 32
 HBOT_BROKER_ID = "Hummingbot"
 
-SIDE_BUY = "BUY"
-SIDE_SELL = "SELL"
+SIDE_BUY = "Buy"
+SIDE_SELL = "Sell"
 
 TIME_IN_FORCE_GTC = "GTC"
 # Base URL
@@ -28,6 +28,7 @@ WS_TRADE_TOPIC = "publicTrade"
 # Websocket private topics
 WS_EXECUTION_TOPIC = "execution"
 WS_WALLET_TOPIC = "wallet"
+WS_ORDER_TOPIC = "order"
 
 # Websocket event types
 DIFF_EVENT_TYPE = "delta"
@@ -35,25 +36,28 @@ TRADE_EVENT_TYPE = "trade"
 SNAPSHOT_EVENT_TYPE = "snapshot"
 
 # Public API endpoints
-LAST_TRADED_PRICE_PATH = "/spot/quote/v1/ticker/price"
-EXCHANGE_INFO_PATH_URL = "/spot/v1/symbols"
+TICKER_PATH_URL = "/v5/market/tickers"
+INSTRUMENTS_INFO_PATH_URL = "/v5/market/instruments-info"
 SNAPSHOT_PATH_URL = "/v5/market/orderbook"
 SERVER_TIME_PATH_URL = "/v5/market/time"
 
 # Private API endpoints
-ACCOUNTS_PATH_URL = "/spot/v1/account"
-MY_TRADES_PATH_URL = "/spot/v1/myTrades"
+WALLET_BALANCE_PATH_URL = "/v5/account/wallet-balance"
+EXECUTION_HISTORY_PATH_URL = "/v5/execution/list"
 ORDER_PATH_URL = "/spot/v1/order"
+ORDER_GET_PATH_URL = "/v5/order/realtime"
+ORDER_CREATE_PATH_URL = "/v5/order/create"
+ORDER_CANCEL_PATH_URL = "/v5/order/cancel"
 
 # Order States
 ORDER_STATE = {
-    "PENDING": OrderState.PENDING_CREATE,
-    "NEW": OrderState.OPEN,
-    "PARTIALLY_FILLED": OrderState.PARTIALLY_FILLED,
-    "FILLED": OrderState.FILLED,
-    "PENDING_CANCEL": OrderState.PENDING_CANCEL,
-    "CANCELED": OrderState.CANCELED,
-    "REJECTED": OrderState.FAILED,
+    "Created": OrderState.PENDING_CREATE,
+    "New": OrderState.OPEN,
+    "PartiallyFilled": OrderState.PARTIALLY_FILLED,
+    "Filled": OrderState.FILLED,
+    "PartiallyFilledCanceled": OrderState.PENDING_CANCEL,
+    "Cancelled": OrderState.CANCELED,
+    "Rejected": OrderState.FAILED,
 }
 
 WS_HEARTBEAT_TIME_INTERVAL = 20
@@ -76,13 +80,43 @@ RATE_LIMITS = {
     RateLimit(limit_id=SHARED_LIMIT, limit=SHARED_MAX_REQUEST, time_interval=FIVE_SECONDS),
 
     # Linked limits
-    # TODO: fill in other API limits
+    # Public APIs
+    RateLimit(
+        limit_id=TICKER_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+    RateLimit(
+        limit_id=INSTRUMENTS_INFO_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
     RateLimit(
         limit_id=SERVER_TIME_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
         linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
     ),
     RateLimit(
         limit_id=SNAPSHOT_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+
+    # Private APIs
+    RateLimit(
+        limit_id=WALLET_BALANCE_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+    RateLimit(
+        limit_id=EXECUTION_HISTORY_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+    RateLimit(
+        limit_id=ORDER_GET_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+    RateLimit(
+        limit_id=ORDER_CREATE_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+    RateLimit(
+        limit_id=ORDER_CANCEL_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
         linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
     ),
 

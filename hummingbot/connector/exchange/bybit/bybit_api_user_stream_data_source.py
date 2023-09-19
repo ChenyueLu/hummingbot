@@ -121,30 +121,36 @@ class BybitAPIUserStreamDataSource(UserStreamTrackerDataSource):
             subscribe_executions_request = WSJSONRequest(payload)
             payload = {
                 "op": "subscribe",
+                "args": [f"{CONSTANTS.WS_ORDER_TOPIC}"],
+            }
+            subscribe_order_request = WSJSONRequest(payload)
+            payload = {
+                "op": "subscribe",
                 "args": [f"{CONSTANTS.WS_WALLET_TOPIC}"],
             }
             subscribe_wallet_request = WSJSONRequest(payload)
 
             await ws.send(subscribe_executions_request)
+            await ws.send(subscribe_order_request)
             await ws.send(subscribe_wallet_request)
 
             self.logger().info(
                 f"Subscribed to private account and orders channels "
-                f"{[CONSTANTS.WS_EXECUTION_TOPIC, CONSTANTS.WS_WALLET_TOPIC]}..."
+                f"{[CONSTANTS.WS_EXECUTION_TOPIC, CONSTANTS.WS_ORDER_TOPIC, CONSTANTS.WS_WALLET_TOPIC]}..."
             )
         except asyncio.CancelledError:
             raise
         except Exception:
             self.logger().exception(
                 f"Unexpected error occurred subscribing to order book trading and delta streams "
-                f"{[CONSTANTS.WS_EXECUTION_TOPIC, CONSTANTS.WS_WALLET_TOPIC]}..."
+                f"{[CONSTANTS.WS_EXECUTION_TOPIC, CONSTANTS.WS_ORDER_TOPIC, CONSTANTS.WS_WALLET_TOPIC]}..."
             )
             raise
 
     async def _process_ws_messages(self, ws: WSAssistant, output: asyncio.Queue):
         async for ws_response in ws.iter_messages():
             data = ws_response.data
-            if data["topic"] in {CONSTANTS.WS_EXECUTION_TOPIC, CONSTANTS.WS_WALLET_TOPIC}:
+            if data["topic"] in {CONSTANTS.WS_EXECUTION_TOPIC, CONSTANTS.WS_ORDER_TOPIC, CONSTANTS.WS_WALLET_TOPIC}:
                 output.put_nowait(data)
 
     async def _get_ws_assistant(self) -> WSAssistant:
