@@ -1623,53 +1623,98 @@ class TestBybitExchange(unittest.TestCase):
         )
         order = self.exchange.in_flight_orders["OID1"]
 
-        event_message = {
-            "e": "executionReport",
-            "t": "1499405658658",
-            "E": "1499405658658",
-            "s": order.trading_pair,
-            "c": order.client_order_id,
-            "S": order.trade_type.name,
-            "o": "LIMIT",
-            "f": "GTC",
-            "q": order.amount,
-            "p": order.price,
-            "X": "FILLED",
-            "i": order.exchange_order_id,
-            "M": "0",
-            "l": order.amount,
-            "z": "0.50000000",
-            "L": order.price,
-            "n": "0.003",
-            "N": self.base_asset,
-            "u": True,
-            "w": True,
-            "m": False,
-            "O": "1499405658657",
-            "Z": "473.199",
-            "A": "0",
-            "C": False,
-            "v": "0"
+        trade_event_message = {
+            "id": "592324803b2785-26fa-4214-9963-bdd4727f07be",
+            "topic": "execution",
+            "creationTime": 1672364174455,
+            "data": [
+                {
+                    "category": "spot",
+                    "symbol": order.trading_pair,
+                    "execFee": "0.003",
+                    "execId": "7e2ae69c-4edf-5800-a352-893d52b446aa",
+                    "execPrice": order.price,
+                    "execQty": order.amount,
+                    "execType": "Trade",
+                    "execValue": "8.435",
+                    "isMaker": False,
+                    "feeRate": "0.0006",
+                    "tradeIv": "",
+                    "markIv": "",
+                    "blockTradeId": "",
+                    "markPrice": "0.3391",
+                    "indexPrice": "",
+                    "underlyingPrice": "",
+                    "leavesQty": "0",
+                    "orderId": order.exchange_order_id,
+                    "orderLinkId": order.client_order_id,
+                    "orderPrice": "0.3207",
+                    "orderQty": "25",
+                    "orderType": "Market",
+                    "stopOrderType": "UNKNOWN",
+                    "side": "Sell",
+                    "execTime": "1672364174443",
+                    "isLeverage": "0",
+                    "closedSize": ""
+                }
+            ]
         }
+        trade_data = trade_event_message["data"][0]
 
-        filled_event = {
-            "e": "ticketInfo",
-            "E": "1621912542359",
-            "s": self.ex_trading_pair,
-            "q": "0.001639",
-            "t": "1621912542314",
-            "p": "61000.0",
-            "T": "899062000267837441",
-            "o": "899048013515737344",
-            "c": "1621910874883",
-            "O": "899062000118679808",
-            "a": "10043",
-            "A": "10024",
-            "m": True
+        order_event_message = {
+            "id": "5923240c6880ab-c59f-420b-9adb-3639adc9dd90",
+            "topic": "order",
+            "creationTime": 1672364262474,
+            "data": [
+                {
+                    "symbol": order.trading_pair,
+                    "orderId": order.exchange_order_id,
+                    "side": "Buy",
+                    "orderType": "Market",
+                    "cancelType": "UNKNOWN",
+                    "price": "72.5",
+                    "qty": "1",
+                    "orderIv": "",
+                    "timeInForce": "IOC",
+                    "orderStatus": "Filled",
+                    "orderLinkId": order.client_order_id,
+                    "lastPriceOnCreated": "",
+                    "reduceOnly": False,
+                    "leavesQty": "",
+                    "leavesValue": "",
+                    "cumExecQty": "1",
+                    "cumExecValue": "75",
+                    "avgPrice": "75",
+                    "blockTradeId": "",
+                    "positionIdx": 0,
+                    "cumExecFee": "0.358635",
+                    "createdTime": "1672364262444",
+                    "updatedTime": "1672364262457",
+                    "rejectReason": "EC_NoError",
+                    "stopOrderType": "",
+                    "tpslMode": "",
+                    "triggerPrice": "",
+                    "takeProfit": "",
+                    "stopLoss": "",
+                    "tpTriggerBy": "",
+                    "slTriggerBy": "",
+                    "tpLimitPrice": "",
+                    "slLimitPrice": "",
+                    "triggerDirection": 0,
+                    "triggerBy": "",
+                    "closeOnTrigger": False,
+                    "category": "option",
+                    "placeType": "price",
+                    "smpType": "None",
+                    "smpGroup": 0,
+                    "smpOrderId": "",
+                    "feeCurrency": ""
+                }
+            ]
         }
 
         mock_queue = AsyncMock()
-        mock_queue.get.side_effect = [event_message, filled_event, asyncio.CancelledError]
+        mock_queue.get.side_effect = [trade_event_message, order_event_message, asyncio.CancelledError]
         self.exchange._user_stream_tracker._user_stream = mock_queue
 
         try:
@@ -1683,12 +1728,12 @@ class TestBybitExchange(unittest.TestCase):
         self.assertEqual(order.trading_pair, fill_event.trading_pair)
         self.assertEqual(order.trade_type, fill_event.trade_type)
         self.assertEqual(order.order_type, fill_event.order_type)
-        match_price = Decimal(event_message["L"])
-        match_size = Decimal(event_message["l"])
+        match_price = Decimal(trade_data["execPrice"])
+        match_size = Decimal(trade_data["execQty"])
         self.assertEqual(match_price, fill_event.price)
         self.assertEqual(match_size, fill_event.amount)
         self.assertEqual(
-            [TokenAmount(amount=Decimal(event_message["n"]), token=(event_message["N"]))],
+            [TokenAmount(amount=Decimal(trade_data["execFee"]), token=order.quote_asset)],
             fill_event.trade_fee.flat_fees)
 
         buy_event: BuyOrderCompletedEvent = self.buy_order_completed_logger.event_log[0]
@@ -1729,6 +1774,49 @@ class TestBybitExchange(unittest.TestCase):
             ]
         }
 
+        event_message = {
+            "id": "5923248e5d0ee3-faeb-4864-87e4-9cd63f785c1b",
+            "topic": "wallet",
+            "creationTime": 1690873065683,
+            "data": [
+                {
+                    "accountIMRate": "0.4782",
+                    "accountMMRate": "0.0151",
+                    "totalEquity": "19620.93864593",
+                    "totalWalletBalance": "18331.93856433",
+                    "totalMarginBalance": "18230.83251552",
+                    "totalAvailableBalance": "9511.52641225",
+                    "totalPerpUPL": "-101.10604881",
+                    "totalInitialMargin": "8719.30610327",
+                    "totalMaintenanceMargin": "277.05763376",
+                    "coin": [
+                        {
+                            "coin": self.base_asset,
+                            "free": "10000",
+                            "equity": "0",
+                            "usdValue": "0",
+                            "walletBalance": "10500",
+                            "availableToWithdraw": "0",
+                            "availableToBorrow": "1500000",
+                            "borrowAmount": "0",
+                            "accruedInterest": "0",
+                            "totalOrderIM": "0",
+                            "totalPositionIM": "0",
+                            "totalPositionMM": "0",
+                            "unrealisedPnl": "0",
+                            "cumRealisedPnl": "-1100.6552094",
+                            "bonus": "0",
+                            "collateralSwitch": True,
+                            "marginCollateral": True,
+                            "locked": "0"
+                        },
+                    ],
+                    "accountLTV": "0",
+                    "accountType": "UNIFIED"
+                }
+            ]
+        }
+
         mock_queue = AsyncMock()
         mock_queue.get.side_effect = [event_message, asyncio.CancelledError]
         self.exchange._user_stream_tracker._user_stream = mock_queue
@@ -1752,31 +1840,3 @@ class TestBybitExchange(unittest.TestCase):
             asyncio.CancelledError,
             self.async_run_with_timeout,
             self.exchange._user_stream_event_listener())
-
-    @patch("hummingbot.connector.exchange.bybit.bybit_exchange.BybitExchange._sleep")
-    def test_user_stream_logs_errors(self, _):
-        self.exchange._set_current_timestamp(1640780000)
-
-        incomplete_event = {
-            "e": "outboundAccountInfo",
-            "E": "1629969654753",
-            "T": True,
-            "W": True,
-            "D": True,
-        }
-
-        mock_queue = AsyncMock()
-        mock_queue.get.side_effect = [incomplete_event, asyncio.CancelledError]
-        self.exchange._user_stream_tracker._user_stream = mock_queue
-
-        try:
-            self.async_run_with_timeout(self.exchange._user_stream_event_listener())
-        except asyncio.CancelledError:
-            pass
-
-        self.assertTrue(
-            self._is_logged(
-                "ERROR",
-                "Unexpected error in user stream listener loop."
-            )
-        )

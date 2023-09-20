@@ -109,7 +109,7 @@ class TestBybitAPIUserStreamDataSource(unittest.TestCase):
         sent_subscription_messages = self.mocking_assistant.json_messages_sent_through_websocket(
             websocket_mock=ws_connect_mock.return_value)
 
-        self.assertEqual(3, len(sent_subscription_messages))
+        self.assertEqual(4, len(sent_subscription_messages))
 
         expires = int((1000 + 10) * 1000)
         _val = f'GET/realtime{expires}'
