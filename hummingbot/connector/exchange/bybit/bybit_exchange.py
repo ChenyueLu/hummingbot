@@ -125,7 +125,7 @@ class BybitExchange(ExchangePyBase):
         return self._trading_required
 
     def supported_order_types(self):
-        return [OrderType.MARKET, OrderType.LIMIT, OrderType.LIMIT_MAKER]
+        return [OrderType.MARKET, OrderType.LIMIT]
 
     def _is_request_exception_related_to_time_synchronizer(self, request_exception: Exception):
         error_description = str(request_exception)
@@ -213,7 +213,7 @@ class BybitExchange(ExchangePyBase):
             "symbol": symbol,
             "side": side_str,
             "qty": amount_str,
-            "type": type_str,
+            "orderType": type_str,
             "orderLinkId": order_id,
         }
         if order_type != OrderType.MARKET:
@@ -343,61 +343,66 @@ class BybitExchange(ExchangePyBase):
                 topic = event_message.get("topic")
 
                 if topic == CONSTANTS.WS_EXECUTION_TOPIC:
-                    client_order_id = event_message.get("orderLinkId")
-                    tracked_order = self._order_tracker.fetch_order(client_order_id=client_order_id)
-                    if tracked_order is not None:
-                        fills_data = event_message.get("data", [])
-                        if fills_data is not None:
-                            for fill_data in fills_data:
-                                exchange_order_id = str(fill_data["orderId"])
-                                fee_asset = tracked_order.quote_asset
-                                fee_amount = Decimal(fill_data["execFee"])
+                    fills_data = event_message.get("data", [])
+                    if fills_data is not None:
+                        for fill_data in fills_data:
+                            client_order_id = fill_data.get("orderLinkId")
+                            tracked_order = self._order_tracker.fetch_order(
+                                client_order_id=client_order_id,
+                            )
+                            if tracked_order is None:
+                                continue
+                            exchange_order_id = str(fill_data["orderId"])
+                            fee_asset = tracked_order.quote_asset
+                            fee_amount = Decimal(fill_data["execFee"])
 
-                                flat_fees = [] if fee_amount == Decimal("0") else [
-                                    TokenAmount(amount=fee_amount, token=fee_asset)
-                                ]
+                            flat_fees = [] if fee_amount == Decimal("0") else [
+                                TokenAmount(amount=fee_amount, token=fee_asset)
+                            ]
 
-                                fee = TradeFeeBase.new_spot_fee(
-                                    fee_schema=self.trade_fee_schema(),
-                                    trade_type=tracked_order.trade_type,
-                                    percent_token=fee_asset,
-                                    flat_fees=flat_fees,
-                                )
+                            fee = TradeFeeBase.new_spot_fee(
+                                fee_schema=self.trade_fee_schema(),
+                                trade_type=tracked_order.trade_type,
+                                percent_token=fee_asset,
+                                flat_fees=flat_fees,
+                            )
 
-                                trade_id = str(fill_data["execId"])
+                            trade_id = str(fill_data["execId"])
 
-                                trade_update = TradeUpdate(
-                                    trade_id=trade_id,
-                                    client_order_id=client_order_id,
-                                    exchange_order_id=exchange_order_id,
-                                    trading_pair=tracked_order.trading_pair,
-                                    fee=fee,
-                                    fill_base_amount=Decimal(fill_data["execQty"]),
-                                    fill_quote_amount=Decimal(fill_data["execPrice"]) * Decimal(
-                                        fill_data["execQty"]),
-                                    fill_price=Decimal(fill_data["execPrice"]),
-                                    fill_timestamp=int(fill_data["execTime"]) * 1e-3,
-                                )
-                                self._order_tracker.process_trade_update(trade_update)
+                            trade_update = TradeUpdate(
+                                trade_id=trade_id,
+                                client_order_id=client_order_id,
+                                exchange_order_id=exchange_order_id,
+                                trading_pair=tracked_order.trading_pair,
+                                fee=fee,
+                                fill_base_amount=Decimal(fill_data["execQty"]),
+                                fill_quote_amount=Decimal(fill_data["execPrice"]) * Decimal(
+                                    fill_data["execQty"]),
+                                fill_price=Decimal(fill_data["execPrice"]),
+                                fill_timestamp=int(fill_data["execTime"]) * 1e-3,
+                            )
+                            self._order_tracker.process_trade_update(trade_update)
 
                 elif topic == CONSTANTS.WS_ORDER_TOPIC:
-                    client_order_id = event_message.get("orderLinkId")
-                    tracked_order = self._order_tracker.fetch_order(client_order_id=client_order_id)
+                    orders_data = event_message.get("data", [])
+                    if orders_data is not None:
+                        for order_data in orders_data:
+                            client_order_id = order_data.get("orderLinkId")
+                            tracked_order = self._order_tracker.fetch_order(
+                                client_order_id=client_order_id,
+                            )
+                            if tracked_order is None:
+                                continue
+                            new_state = CONSTANTS.ORDER_STATE[order_data["orderStatus"]]
 
-                    if tracked_order is not None:
-                        orders_data = event_message.get("data", [])
-                        if orders_data is not None:
-                            for order_data in orders_data:
-                                new_state = CONSTANTS.ORDER_STATE[order_data["orderStatus"]]
-
-                                order_update = OrderUpdate(
-                                    client_order_id=tracked_order.client_order_id,
-                                    exchange_order_id=str(order_data["orderId"]),
-                                    trading_pair=tracked_order.trading_pair,
-                                    update_timestamp=int(order_data["updatedTime"]) * 1e-3,
-                                    new_state=new_state,
-                                )
-                                self._order_tracker.process_order_update(order_update=order_update)
+                            order_update = OrderUpdate(
+                                client_order_id=tracked_order.client_order_id,
+                                exchange_order_id=str(order_data["orderId"]),
+                                trading_pair=tracked_order.trading_pair,
+                                update_timestamp=int(order_data["updatedTime"]) * 1e-3,
+                                new_state=new_state,
+                            )
+                            self._order_tracker.process_order_update(order_update=order_update)
 
                 elif topic == CONSTANTS.WS_WALLET_TOPIC:
                     wallets_data = event_message.get("data", [])
