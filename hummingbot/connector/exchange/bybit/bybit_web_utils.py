@@ -57,9 +57,9 @@ async def get_current_server_time(
     api_factory = build_api_factory_without_time_synchronizer_pre_processor(throttler=throttler)
     rest_assistant = await api_factory.get_rest_assistant()
     response = await rest_assistant.execute_request(
-        url=CONSTANTS.SERVER_TIME_PATH_URL,
+        url=rest_url(CONSTANTS.SERVER_TIME_PATH_URL, domain=domain),
         method=RESTMethod.GET,
         throttler_limit_id=CONSTANTS.SERVER_TIME_PATH_URL,
     )
-    server_time = float(response["result"]["timeNano"]) / 1000
+    server_time = float(response["result"]["timeNano"]) * 1e-6
     return server_time
