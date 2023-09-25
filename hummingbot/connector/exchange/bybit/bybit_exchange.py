@@ -300,13 +300,16 @@ class BybitExchange(ExchangePyBase):
         retval = []
         for rule in trading_pair_rules:
             try:
+                self.logger().info(f"Parsing rule: {rule}")
                 trading_pair = await self.trading_pair_associated_to_exchange_symbol(
-                    symbol=rule.get("symbol"))
+                    symbol=rule.get("name"))
 
                 size_attrs = rule.get("lotSizeFilter")
+                price_filter = rule.get("priceFilter")
                 min_order_size = size_attrs.get("minOrderQty")
-                max_order_size = size_attrs.get("maxOrderQty")
-                min_quote_amount_increment = size_attrs.get("quotePrecision")
+                # max_order_size = size_attrs.get("maxOrderQty")
+                # min_quote_amount_increment = size_attrs.get("quotePrecision")
+                min_price_increment = price_filter.get("tickSize")
                 min_base_amount_increment = size_attrs.get("basePrecision")
                 min_notional_size = size_attrs.get("minOrderAmt")
 
@@ -314,11 +317,10 @@ class BybitExchange(ExchangePyBase):
                     TradingRule(
                         trading_pair,
                         min_order_size=Decimal(min_order_size),
-                        max_order_size=Decimal(max_order_size),
-                        min_quote_amount_increment=Decimal(min_quote_amount_increment),
+                        min_price_increment=Decimal(min_price_increment),
                         min_base_amount_increment=Decimal(min_base_amount_increment),
                         min_notional_size=Decimal(min_notional_size),
-                    ),
+                    )
                 )
 
             except Exception:
