@@ -152,7 +152,7 @@ class BybitAPIUserStreamDataSource(UserStreamTrackerDataSource):
             data = ws_response.data
             # TODO: remove debug logger
             self.logger().info(f"Received message: {data}")
-            if data["topic"] in {CONSTANTS.WS_EXECUTION_TOPIC, CONSTANTS.WS_ORDER_TOPIC, CONSTANTS.WS_WALLET_TOPIC}:
+            if data.get("topic", None) in {CONSTANTS.WS_EXECUTION_TOPIC, CONSTANTS.WS_ORDER_TOPIC, CONSTANTS.WS_WALLET_TOPIC}:
                 output.put_nowait(data)
 
     async def _get_ws_assistant(self) -> WSAssistant:
