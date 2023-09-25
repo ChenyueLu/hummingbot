@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-import json
 import time
 from collections import OrderedDict
 from typing import Dict
@@ -30,14 +29,10 @@ class BybitAuth(AuthBase):
         :param request: the request to be configured for authenticated interaction
         """
         # Get payload
-        # TODO: remove log
-        print(f"Test: secret {self.secret_key}")
-        print(f"Test: payload {request.data}")
         if request.method == RESTMethod.POST:
-            payload = json.dumps(request.data)
+            payload = request.data
         else:
             payload = urlencode(request.params or {})
-        print(f"Test: payload str {payload}")
         # Update headers with authentication fields
         headers = self.add_auth_to_header(payload)
         if request.headers is not None:
@@ -58,8 +53,6 @@ class BybitAuth(AuthBase):
 
         # Generate signature
         params_str = str(timestamp) + self.api_key + str(self.recv_window) + payload_str
-        # TODO: remove log
-        print(f"Test: param_str {params_str}")
         signature = hmac.new(
             self.secret_key.encode("utf-8"),
             params_str.encode("utf-8"),
