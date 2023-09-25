@@ -229,6 +229,9 @@ class BybitExchange(ExchangePyBase):
             headers={"referer": CONSTANTS.HBOT_BROKER_ID},
         )
 
+        # TODO: remove this logger
+        self.logger().info(f"Place order result: {order_result}")
+
         o_id = str(order_result["result"]["orderId"])
         transact_time = int(order_result["time"]) * 1e-3
         return (o_id, transact_time)
