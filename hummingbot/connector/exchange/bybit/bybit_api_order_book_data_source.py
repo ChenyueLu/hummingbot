@@ -211,6 +211,7 @@ class BybitAPIOrderBookDataSource(OrderBookTrackerDataSource):
     async def _process_ws_messages(self, ws: WSAssistant):
         async for ws_response in ws.iter_messages():
             data = ws_response.data
+            self.logger().info(f"Received order book message: {data}")
             if "success" in data:
                 continue
             topic = data.get("topic")
