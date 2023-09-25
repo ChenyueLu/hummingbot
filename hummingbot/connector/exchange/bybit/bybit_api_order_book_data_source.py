@@ -243,6 +243,8 @@ class BybitAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     order_book_message: OrderBookMessage = BybitOrderBook.snapshot_message_from_exchange_websocket(
                         json_msg["data"], ts, {"trading_pair": trading_pair},
                     )
+                    # TODO: remove log
+                    self.logger().info(f"Parsed order book snapshot message: {order_book_message}")
                     snapshot_queue.put_nowait(order_book_message)
                 else:
                     self.logger().warning(
