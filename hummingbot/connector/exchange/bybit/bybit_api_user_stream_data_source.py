@@ -150,8 +150,7 @@ class BybitAPIUserStreamDataSource(UserStreamTrackerDataSource):
     async def _process_ws_messages(self, ws: WSAssistant, output: asyncio.Queue):
         async for ws_response in ws.iter_messages():
             data = ws_response.data
-            # TODO: remove debug logger
-            self.logger().info(f"Received message: {data}")
+            # self.logger().info(f"Received message: {data}")
             if data.get("topic", None) in {CONSTANTS.WS_EXECUTION_TOPIC, CONSTANTS.WS_ORDER_TOPIC, CONSTANTS.WS_WALLET_TOPIC}:
                 output.put_nowait(data)
 
