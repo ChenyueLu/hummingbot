@@ -223,7 +223,7 @@ class BybitExchange(ExchangePyBase):
 
         order_result = await self._api_post(
             path_url=CONSTANTS.ORDER_CREATE_PATH_URL,
-            params=api_params,
+            data=api_params,
             is_auth_required=True,
             trading_pair=trading_pair,
         )
@@ -252,7 +252,7 @@ class BybitExchange(ExchangePyBase):
             api_params["orderLinkId"] = tracked_order.client_order_id
         cancel_result = await self._api_post(
             path_url=CONSTANTS.ORDER_CANCEL_PATH_URL,
-            params=api_params,
+            data=api_params,
             is_auth_required=True,
         )
 
