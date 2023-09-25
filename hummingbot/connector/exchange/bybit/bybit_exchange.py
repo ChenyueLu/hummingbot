@@ -259,41 +259,34 @@ class BybitExchange(ExchangePyBase):
     async def _format_trading_rules(self, exchange_info_dict: Dict[str, Any]) -> List[TradingRule]:
         """
         Example:
-                {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": null,
-            "ext_info": null,
-            "result": [
-                {
-                    "name": "BTCUSDT",
-                    "alias": "BTCUSDT",
-                    "baseCurrency": "BTC",
-                    "quoteCurrency": "USDT",
-                    "basePrecision": "0.000001",
-                    "quotePrecision": "0.01",
-                    "minTradeQuantity": "0.0001",
-                    "minTradeAmount": "10",
-                    "minPricePrecision": "0.01",
-                    "maxTradeQuantity": "2",
-                    "maxTradeAmount": "200",
-                    "category": 1
-                },
-                {
-                    "name": "ETHUSDT",
-                    "alias": "ETHUSDT",
-                    "baseCurrency": "ETH",
-                    "quoteCurrency": "USDT",
-                    "basePrecision": "0.0001",
-                    "quotePrecision": "0.01",
-                    "minTradeQuantity": "0.0001",
-                    "minTradeAmount": "10",
-                    "minPricePrecision": "0.01",
-                    "maxTradeQuantity": "2",
-                    "maxTradeAmount": "200",
-                    "category": 1
-                }
-            ]
+        {
+            "retCode": 0,
+            "retMsg": "OK",
+            "result": {
+                "category": "spot",
+                "list": [
+                    {
+                        "symbol": "BTCUSDT",
+                        "baseCoin": "BTC",
+                        "quoteCoin": "USDT",
+                        "innovation": "0",
+                        "status": "Trading",
+                        "marginTrading": "both",
+                        "lotSizeFilter": {
+                        "basePrecision": "0.000001",
+                        "quotePrecision": "0.00000001",
+                        "minOrderQty": "0.000048",
+                        "maxOrderQty": "71.73956243",
+                        "minOrderAmt": "1",
+                        "maxOrderAmt": "2000000"
+                        },
+                        "priceFilter": {
+                        "tickSize": "0.01"
+                    }
+                ]
+            },
+            "retExtInfo": {},
+            "time": 1672712468011
         }
         """
         trading_pair_rules = exchange_info_dict.get("result", {}).get("list", [])
