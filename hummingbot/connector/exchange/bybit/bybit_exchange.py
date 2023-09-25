@@ -226,11 +226,12 @@ class BybitExchange(ExchangePyBase):
             params=api_params,
             is_auth_required=True,
             trading_pair=trading_pair,
-            headers={"referer": CONSTANTS.HBOT_BROKER_ID},
         )
 
-        # TODO: remove this logger
-        self.logger().info(f"Place order result: {order_result}")
+        if order_result["retCode"] != 0:
+            err_msg = f"Place order failed: {order_result}"
+            self.logger().error(err_msg)
+            raise Exception(err_msg)
 
         o_id = str(order_result["result"]["orderId"])
         transact_time = int(order_result["time"]) * 1e-3
