@@ -104,6 +104,8 @@ class RESTAssistant:
         request = deepcopy(request)
         request = await self._pre_process_request(request)
         request = await self._authenticate(request)
+        # TODO: remove log
+        print(request)
         resp = await wait_for(self._connection.call(request), timeout)
         resp = await self._post_process_response(resp)
         return resp
