@@ -297,6 +297,7 @@ class BybitExchange(ExchangePyBase):
         retval = []
         for rule in trading_pair_rules:
             try:
+                # TODO: remove log
                 self.logger().info(f"Parsing rule: {rule}")
                 trading_pair = await self.trading_pair_associated_to_exchange_symbol(
                     symbol=rule.get("symbol"))
