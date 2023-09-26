@@ -108,14 +108,11 @@ class BybitAPIOrderBookDataSource(OrderBookTrackerDataSource):
             trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(
                 symbol=symbol,
             )
-            # self.logger().info(f"Parsed diff order book message: {data}")
-            # self.logger().info(f"Diff order book trading pair: {trading_pair}")
             order_book_message: OrderBookMessage = BybitOrderBook.diff_message_from_exchange(
                 data,
                 ts,
                 {"trading_pair": trading_pair},
             )
-            # self.logger().info(f"Further parsed order book diff message: {order_book_message}")
             message_queue.put_nowait(order_book_message)
 
     async def listen_for_order_book_snapshots(self, ev_loop: asyncio.AbstractEventLoop, output: asyncio.Queue):
@@ -214,7 +211,6 @@ class BybitAPIOrderBookDataSource(OrderBookTrackerDataSource):
     async def _process_ws_messages(self, ws: WSAssistant):
         async for ws_response in ws.iter_messages():
             data = ws_response.data
-            # self.logger().info(f"Received order book message: {data}")
             if "success" in data:
                 continue
             topic = data.get("topic")
@@ -243,7 +239,6 @@ class BybitAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     order_book_message: OrderBookMessage = BybitOrderBook.snapshot_message_from_exchange_websocket(
                         json_msg["data"], ts, {"trading_pair": trading_pair},
                     )
-                    # self.logger().info(f"Parsed order book snapshot message: {order_book_message}")
                     snapshot_queue.put_nowait(order_book_message)
                 else:
                     self.logger().warning(

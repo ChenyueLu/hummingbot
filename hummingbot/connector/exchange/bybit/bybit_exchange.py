@@ -297,8 +297,6 @@ class BybitExchange(ExchangePyBase):
         retval = []
         for rule in trading_pair_rules:
             try:
-                # TODO: remove log
-                self.logger().info(f"Parsing rule: {rule}")
                 trading_pair = await self.trading_pair_associated_to_exchange_symbol(
                     symbol=rule.get("symbol"))
 
@@ -341,7 +339,6 @@ class BybitExchange(ExchangePyBase):
         async for event_message in self._iter_user_event_queue():
             try:
                 topic = event_message.get("topic")
-                # self.logger().info(f"User stream event message: {event_message}")
 
                 if topic == CONSTANTS.WS_EXECUTION_TOPIC:
                     fills_data = event_message.get("data", [])
