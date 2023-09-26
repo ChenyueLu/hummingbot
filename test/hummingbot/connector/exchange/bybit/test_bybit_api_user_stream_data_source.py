@@ -90,7 +90,12 @@ class TestBybitAPIUserStreamDataSource(unittest.TestCase):
         auth_time_mock.side_effect = [1000]
         ws_connect_mock.return_value = self.mocking_assistant.create_websocket_mock()
 
-        result_auth = {'auth': 'success', 'userId': 24068148}
+        result_auth = {
+            "success": True,
+            "ret_msg": "",
+            "op": "auth",
+            "conn_id": "cejreaspqfh3sjdnldmg-p"
+        }
         self.mocking_assistant.add_websocket_aiohttp_message(
             websocket_mock=ws_connect_mock.return_value,
             message=json.dumps(result_auth))
@@ -104,7 +109,7 @@ class TestBybitAPIUserStreamDataSource(unittest.TestCase):
         sent_subscription_messages = self.mocking_assistant.json_messages_sent_through_websocket(
             websocket_mock=ws_connect_mock.return_value)
 
-        self.assertEqual(1, len(sent_subscription_messages))
+        self.assertEqual(4, len(sent_subscription_messages))
 
         expires = int((1000 + 10) * 1000)
         _val = f'GET/realtime{expires}'
@@ -121,7 +126,12 @@ class TestBybitAPIUserStreamDataSource(unittest.TestCase):
     def test_listen_for_user_stream_does_not_queue_pong_payload(self, mock_ws):
 
         mock_pong = {
-            "pong": "1545910590801"
+            "req_id": "test",
+            "op": "pong",
+            "args": [
+                "1675418560633"
+            ],
+            "conn_id": "cfcb4ocsvfriu23r3er0-1b"
         }
         mock_ws.return_value = self.mocking_assistant.create_websocket_mock()
         self.mocking_assistant.add_websocket_aiohttp_message(mock_ws.return_value, json.dumps(mock_pong))
@@ -136,27 +146,61 @@ class TestBybitAPIUserStreamDataSource(unittest.TestCase):
         self.assertEqual(0, msg_queue.qsize())
 
     @patch("aiohttp.ClientSession.ws_connect", new_callable=AsyncMock)
-    def test_listen_for_user_stream_does_not_queue_ticket_info(self, mock_ws):
+    def test_listen_for_user_stream_does_not_queue_order(self, mock_ws):
 
-        ticket_info = [
-            {
-                "e": "ticketInfo",
-                "E": "1621912542359",
-                "s": "BTCUSDT",
-                "q": "0.001639",
-                "t": "1621912542314",
-                "p": "61000.0",
-                "T": "899062000267837441",
-                "o": "899048013515737344",
-                "c": "1621910874883",
-                "O": "899062000118679808",
-                "a": "10043",
-                "A": "10024",
-                "m": True
-            }
-        ]
+        order = {
+            "id": "5923240c6880ab-c59f-420b-9adb-3639adc9dd90",
+            "topic": "order",
+            "creationTime": 1672364262474,
+            "data": [
+                {
+                    "symbol": "ETH-30DEC22-1400-C",
+                    "orderId": "5cf98598-39a7-459e-97bf-76ca765ee020",
+                    "side": "Sell",
+                    "orderType": "Market",
+                    "cancelType": "UNKNOWN",
+                    "price": "72.5",
+                    "qty": "1",
+                    "orderIv": "",
+                    "timeInForce": "IOC",
+                    "orderStatus": "Filled",
+                    "orderLinkId": "",
+                    "lastPriceOnCreated": "",
+                    "reduceOnly": False,
+                    "leavesQty": "",
+                    "leavesValue": "",
+                    "cumExecQty": "1",
+                    "cumExecValue": "75",
+                    "avgPrice": "75",
+                    "blockTradeId": "",
+                    "positionIdx": 0,
+                    "cumExecFee": "0.358635",
+                    "createdTime": "1672364262444",
+                    "updatedTime": "1672364262457",
+                    "rejectReason": "EC_NoError",
+                    "stopOrderType": "",
+                    "tpslMode": "",
+                    "triggerPrice": "",
+                    "takeProfit": "",
+                    "stopLoss": "",
+                    "tpTriggerBy": "",
+                    "slTriggerBy": "",
+                    "tpLimitPrice": "",
+                    "slLimitPrice": "",
+                    "triggerDirection": 0,
+                    "triggerBy": "",
+                    "closeOnTrigger": False,
+                    "category": "option",
+                    "placeType": "price",
+                    "smpType": "None",
+                    "smpGroup": 0,
+                    "smpOrderId": "",
+                    "feeCurrency": ""
+                }
+            ]
+        }
         mock_ws.return_value = self.mocking_assistant.create_websocket_mock()
-        self.mocking_assistant.add_websocket_aiohttp_message(mock_ws.return_value, json.dumps(ticket_info))
+        self.mocking_assistant.add_websocket_aiohttp_message(mock_ws.return_value, json.dumps(order))
 
         msg_queue = asyncio.Queue()
         self.listening_task = self.ev_loop.create_task(
@@ -173,7 +217,12 @@ class TestBybitAPIUserStreamDataSource(unittest.TestCase):
         auth_time_mock.side_effect = [100]
         ws_connect_mock.return_value = self.mocking_assistant.create_websocket_mock()
 
-        result_auth = {'auth': 'fail', 'userId': 24068148}
+        result_auth = {
+            "success": False,
+            "ret_msg": "",
+            "op": "auth",
+            "conn_id": "cejreaspqfh3sjdnldmg-p"
+        }
         self.mocking_assistant.add_websocket_aiohttp_message(
             websocket_mock=ws_connect_mock.return_value,
             message=json.dumps(result_auth))
@@ -222,7 +271,12 @@ class TestBybitAPIUserStreamDataSource(unittest.TestCase):
 
         ws_connect_mock.return_value = self.mocking_assistant.create_websocket_mock()
 
-        result_auth = {'auth': 'success', 'userId': 24068148}
+        result_auth = {
+            "success": True,
+            "ret_msg": "",
+            "op": "auth",
+            "conn_id": "cejreaspqfh3sjdnldmg-p"
+        }
 
         self.mocking_assistant.add_websocket_aiohttp_message(
             websocket_mock=ws_connect_mock.return_value,
@@ -238,6 +292,6 @@ class TestBybitAPIUserStreamDataSource(unittest.TestCase):
             websocket_mock=ws_connect_mock.return_value)
 
         expected_ping_message = {
-            "ping": 1101 * 1e3,
+            "op": "ping",
         }
         self.assertEqual(expected_ping_message, sent_messages[-1])

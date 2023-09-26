@@ -6,6 +6,7 @@ from hummingbot.core.data_type.order_book_message import OrderBookMessage, Order
 
 
 class BybitOrderBook(OrderBook):
+    # TODO: should change order datasource parse logic as every message may contains multiple snapshot
     @classmethod
     def snapshot_message_from_exchange_websocket(cls,
                                                  msg: Dict[str, any],
@@ -20,10 +21,9 @@ class BybitOrderBook(OrderBook):
         """
         if metadata:
             msg.update(metadata)
-        ts = msg["t"]
         return OrderBookMessage(OrderBookMessageType.SNAPSHOT, {
             "trading_pair": msg["trading_pair"],
-            "update_id": ts,
+            "update_id": msg["u"],
             "bids": msg["b"],
             "asks": msg["a"]
         }, timestamp=timestamp)
@@ -42,14 +42,14 @@ class BybitOrderBook(OrderBook):
         """
         if metadata:
             msg.update(metadata)
-        ts = msg["time"]
         return OrderBookMessage(OrderBookMessageType.SNAPSHOT, {
             "trading_pair": msg["trading_pair"],
-            "update_id": ts,
-            "bids": msg["bids"],
-            "asks": msg["asks"]
+            "update_id": msg["u"],
+            "bids": msg["b"],
+            "asks": msg["a"]
         }, timestamp=timestamp)
 
+    # TODO: should change order datasource parse logic as every message may contains multiple diff
     @classmethod
     def diff_message_from_exchange(cls,
                                    msg: Dict[str, any],
@@ -64,14 +64,14 @@ class BybitOrderBook(OrderBook):
         """
         if metadata:
             msg.update(metadata)
-        ts = msg["t"]
         return OrderBookMessage(OrderBookMessageType.DIFF, {
             "trading_pair": msg["trading_pair"],
-            "update_id": ts,
+            "update_id": msg["u"],
             "bids": msg["b"],
             "asks": msg["a"]
         }, timestamp=timestamp)
 
+    # TODO: should change order datasource parse logic as every message may contains multiple trades
     @classmethod
     def trade_message_from_exchange(cls, msg: Dict[str, any], metadata: Optional[Dict] = None):
         """
@@ -82,12 +82,12 @@ class BybitOrderBook(OrderBook):
         """
         if metadata:
             msg.update(metadata)
-        ts = msg["t"]
+        ts = msg["T"] * 1e-3
         return OrderBookMessage(OrderBookMessageType.TRADE, {
             "trading_pair": msg["trading_pair"],
-            "trade_type": float(TradeType.BUY.value) if msg["m"] else float(TradeType.SELL.value),
-            "trade_id": ts,
+            "trade_type": float(TradeType.BUY.value) if msg["S"] == "Buy" else float(TradeType.SELL.value),
+            "trade_id": msg["i"],
             "update_id": ts,
             "price": msg["p"],
-            "amount": msg["q"]
-        }, timestamp=ts * 1e-3)
+            "amount": msg["v"]
+        }, timestamp=ts)

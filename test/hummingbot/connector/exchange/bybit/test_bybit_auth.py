@@ -1,8 +1,8 @@
 import asyncio
 import hashlib
 import hmac
-from collections import OrderedDict
-from typing import Any, Awaitable, Dict, Mapping, Optional
+import json
+from typing import Awaitable, Dict, Mapping, Optional
 from unittest import TestCase
 from unittest.mock import MagicMock
 from urllib.parse import urlencode
@@ -16,7 +16,6 @@ class BybitAuthTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
         self.api_key = "testApiKey"
-        self.passphrase = "testPassphrase"
         self.secret_key = "testSecretKey"
 
         self.mock_time_provider = MagicMock()
@@ -39,13 +38,14 @@ class BybitAuthTests(TestCase):
             is_auth_required=True,
             throttler_limit_id="/api/endpoint"
         )
-        params_expected = self._params_expected(request.params)
+        headers_expected = self._headers_expected(RESTMethod.GET, request.params)
 
         self.async_run_with_timeout(self.auth.rest_authenticate(request))
 
-        self.assertEqual(params_expected['api_key'], request.params["api_key"])
-        self.assertEqual(params_expected['timestamp'], request.params["timestamp"])
-        self.assertEqual(params_expected['sign'], request.params["sign"])
+        self.assertEqual(headers_expected['X-BAPI-API-KEY'], request.headers["X-BAPI-API-KEY"])
+        self.assertEqual(headers_expected['X-BAPI-TIMESTAMP'], request.headers["X-BAPI-TIMESTAMP"])
+        self.assertEqual(headers_expected['X-BAPI-RECV-WINDOW'], request.headers["X-BAPI-RECV-WINDOW"])
+        self.assertEqual(headers_expected['X-BAPI-SIGN'], request.headers['X-BAPI-SIGN'])
 
     def test_add_auth_params_to_get_request_with_params(self):
         params = {
@@ -60,53 +60,89 @@ class BybitAuthTests(TestCase):
             throttler_limit_id="/api/endpoint"
         )
 
-        params_expected = self._params_expected(request.params)
+        headers_expected = self._headers_expected(RESTMethod.GET, request.params)
 
         self.async_run_with_timeout(self.auth.rest_authenticate(request))
 
-        self.assertEqual(params_expected['api_key'], request.params["api_key"])
-        self.assertEqual(params_expected['timestamp'], request.params["timestamp"])
-        self.assertEqual(params_expected['sign'], request.params["sign"])
-        self.assertEqual(params_expected['param_z'], request.params["param_z"])
-        self.assertEqual(params_expected['param_a'], request.params["param_a"])
+        self.assertEqual(headers_expected['X-BAPI-API-KEY'], request.headers["X-BAPI-API-KEY"])
+        self.assertEqual(headers_expected['X-BAPI-TIMESTAMP'], request.headers["X-BAPI-TIMESTAMP"])
+        self.assertEqual(headers_expected['X-BAPI-RECV-WINDOW'], request.headers["X-BAPI-RECV-WINDOW"])
+        self.assertEqual(headers_expected['X-BAPI-SIGN'], request.headers['X-BAPI-SIGN'])
 
     def test_add_auth_params_to_post_request(self):
         params = {"param_z": "value_param_z", "param_a": "value_param_a"}
         request = RESTRequest(
             method=RESTMethod.POST,
             url="https://test.url/api/endpoint",
-            data=params,
+            data=json.dumps(params),
             is_auth_required=True,
             throttler_limit_id="/api/endpoint"
         )
-        params_auth = self._params_expected(request.params)
-        params_request = self._params_expected(request.data)
+        headers_expected = self._headers_expected(RESTMethod.POST, request.data)
 
         self.async_run_with_timeout(self.auth.rest_authenticate(request))
-        self.assertEqual(params_auth['api_key'], request.params["api_key"])
-        self.assertEqual(params_auth['timestamp'], request.params["timestamp"])
-        self.assertEqual(params_auth['sign'], request.params["sign"])
-        self.assertEqual(params_request['param_z'], request.data["param_z"])
-        self.assertEqual(params_request['param_a'], request.data["param_a"])
 
-    def test_no_auth_added_to_wsrequest(self):
+        self.assertEqual(headers_expected['X-BAPI-API-KEY'], request.headers["X-BAPI-API-KEY"])
+        self.assertEqual(headers_expected['X-BAPI-TIMESTAMP'], request.headers["X-BAPI-TIMESTAMP"])
+        self.assertEqual(headers_expected['X-BAPI-RECV-WINDOW'], request.headers["X-BAPI-RECV-WINDOW"])
+        self.assertEqual(headers_expected['X-BAPI-SIGN'], request.headers['X-BAPI-SIGN'])
+
+    def test_no_auth_added_to_ws_request(self):
         payload = {"param1": "value_param_1"}
         request = WSJSONRequest(payload=payload, is_auth_required=True)
         self.async_run_with_timeout(self.auth.ws_authenticate(request))
         self.assertEqual(payload, request.payload)
 
-    def _generate_signature(self, params: Dict[str, Any]) -> str:
-        encoded_params_str = urlencode(params)
-        digest = hmac.new(self.secret_key.encode("utf8"), encoded_params_str.encode("utf8"), hashlib.sha256).hexdigest()
+    def test_ws_auth_message(self):
+        auth_message = self.auth.generate_ws_authentication_message()
+        expected_auth_message = self._ws_auth_message_expected()
+
+        self.assertEqual(expected_auth_message, auth_message)
+
+    def _generate_signature(self, payload_str: str) -> str:
+        param_str = str(1000000) + self.api_key + str(5000) + payload_str
+        digest = hmac.new(
+            self.secret_key.encode("utf8"),
+            param_str.encode("utf8"),
+            hashlib.sha256
+        ).hexdigest()
         return digest
 
-    def _params_expected(self, request_params: Optional[Mapping[str, str]]) -> Dict:
+    def _headers_expected(
+            self,
+            request_method: RESTMethod,
+            request_params: Optional[Mapping[str, str]],
+    ) -> Dict:
         request_params = request_params if request_params else {}
-        params = {
-            'timestamp': 1000000,
-            'api_key': self.api_key,
+
+        if request_method == RESTMethod.GET:
+            payload_str = urlencode(request_params)
+        else:
+            payload_str = request_params
+
+        headers = {}
+
+        signature = self._generate_signature(payload_str)
+
+        # headers need to verify
+        headers["X-BAPI-API-KEY"] = self.api_key
+        headers["X-BAPI-TIMESTAMP"] = "1000000"
+        headers["X-BAPI-RECV-WINDOW"] = "5000"
+        headers["X-BAPI-SIGN"] = signature
+
+        return headers
+
+    def _ws_auth_message_expected(self):
+        expires = 1010000
+
+        signature = str(hmac.new(
+            bytes(self.secret_key, "utf-8"),
+            bytes(f"GET/realtime{expires}", "utf-8"), digestmod="sha256"
+        ).hexdigest())
+
+        expected = {
+            "op": "auth",
+            "args": [self.api_key, expires, signature]
         }
-        params.update(request_params)
-        params = OrderedDict(sorted(params.items(), key=lambda t: t[0]))
-        params['sign'] = self._generate_signature(params=params)
-        return params
+
+        return expected

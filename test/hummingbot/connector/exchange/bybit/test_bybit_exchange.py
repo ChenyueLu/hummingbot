@@ -31,6 +31,7 @@ from hummingbot.core.event.events import (
     SellOrderCreatedEvent,
 )
 from hummingbot.core.network_iterator import NetworkStatus
+from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 
 
 class TestBybitExchange(unittest.TestCase):
@@ -108,7 +109,8 @@ class TestBybitExchange(unittest.TestCase):
         self.log_records.append(record)
 
     def _is_logged(self, log_level: str, message: str) -> bool:
-        return any(record.levelname == log_level and record.getMessage() == message for record in self.log_records)
+        return any(record.levelname == log_level and record.getMessage() == message for record in
+                   self.log_records)
 
     def async_run_with_timeout(self, coroutine: Awaitable, timeout: int = 1):
         ret = self.ev_loop.run_until_complete(asyncio.wait_for(coroutine, timeout))
@@ -116,27 +118,34 @@ class TestBybitExchange(unittest.TestCase):
 
     def get_exchange_rules_mock(self) -> Dict:
         exchange_rules = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
-            "result": [
-                {
-                    "name": self.ex_trading_pair,
-                    "alias": self.ex_trading_pair,
-                    "baseCurrency": "COINALPHA",
-                    "quoteCurrency": "USDT",
-                    "basePrecision": "0.000001",
-                    "quotePrecision": "0.01",
-                    "minTradeQuantity": "0.0001",
-                    "minTradeAmount": "10",
-                    "minPricePrecision": "0.01",
-                    "maxTradeQuantity": "2",
-                    "maxTradeAmount": "200",
-                    "category": 1,
-                    "showStatus": True
-                },
-            ]
+            "retCode": 0,
+            "retMsg": "OK",
+            "result": {
+                "category": "spot",
+                "list": [
+                    {
+                        "symbol": self.ex_trading_pair,
+                        "baseCoin": "COINALPHA",
+                        "quoteCoin": "USDT",
+                        "innovation": "0",
+                        "status": "Trading",
+                        "marginTrading": "both",
+                        "lotSizeFilter": {
+                            "basePrecision": "0.000001",
+                            "quotePrecision": "0.00000001",
+                            "minOrderQty": "0.000048",
+                            "maxOrderQty": "71.73956243",
+                            "minOrderAmt": "1",
+                            "maxOrderAmt": "2000000"
+                        },
+                        "priceFilter": {
+                            "tickSize": "0.01"
+                        },
+                    }
+                ]
+            },
+            "retExtInfo": {},
+            "time": 1672712468011
         }
         return exchange_rules
 
@@ -150,31 +159,35 @@ class TestBybitExchange(unittest.TestCase):
             )
         }
 
-    def _validate_auth_credentials_present(self, request_call_tuple: NamedTuple):
+    def _validate_auth_credentials_present(
+            self, request_call_tuple: NamedTuple, http_method: RESTMethod = RESTMethod.GET,
+    ):
         request_headers = request_call_tuple.kwargs["headers"]
-        request_params = request_call_tuple.kwargs["params"]
+        expected_content_type = "application/json" if http_method != RESTMethod.GET else "application/x-www-form-urlencoded"
         self.assertIn("Content-Type", request_headers)
-        self.assertEqual("application/x-www-form-urlencoded", request_headers["Content-Type"])
-        self.assertIn("api_key", request_params)
-        self.assertIn("sign", request_params)
+        self.assertEqual(expected_content_type, request_headers["Content-Type"])
+        self.assertIn("X-BAPI-API-KEY", request_headers)
+        self.assertIn("X-BAPI-TIMESTAMP", request_headers)
+        self.assertIn("X-BAPI-RECV-WINDOW", request_headers)
+        self.assertIn("X-BAPI-SIGN", request_headers)
 
     def test_supported_order_types(self):
         supported_types = self.exchange.supported_order_types()
         self.assertIn(OrderType.MARKET, supported_types)
         self.assertIn(OrderType.LIMIT, supported_types)
-        self.assertIn(OrderType.LIMIT_MAKER, supported_types)
 
     @aioresponses()
     def test_check_network_success(self, mock_api):
         url = web_utils.rest_url(CONSTANTS.SERVER_TIME_PATH_URL)
         resp = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
+            "retCode": 0,
+            "retMsg": "OK",
             "result": {
-                "serverTime": 1625799317787
-            }
+                "timeSecond": "1688639403",
+                "timeNano": "1688639403423213947"
+            },
+            "retExtInfo": {},
+            "time": 1688639403423
         }
         mock_api.get(url, body=json.dumps(resp))
 
@@ -197,51 +210,23 @@ class TestBybitExchange(unittest.TestCase):
 
         mock_api.get(url, exception=asyncio.CancelledError)
 
-        self.assertRaises(asyncio.CancelledError, self.async_run_with_timeout, self.exchange.check_network())
+        self.assertRaises(asyncio.CancelledError, self.async_run_with_timeout,
+                          self.exchange.check_network())
 
     @aioresponses()
     def test_update_trading_rules(self, mock_api):
         self.exchange._set_current_timestamp(1000)
 
-        url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
+        url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
+        regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
         resp = self.get_exchange_rules_mock()
-        mock_api.get(url, body=json.dumps(resp))
-        mock_api.get(url, body=json.dumps(resp))
+        mock_api.get(regex_url, body=json.dumps(resp))
+        mock_api.get(regex_url, body=json.dumps(resp))
 
         self.async_run_with_timeout(coroutine=self.exchange._update_trading_rules())
 
         self.assertTrue(self.trading_pair in self.exchange._trading_rules)
-
-    @aioresponses()
-    def test_update_trading_rules_ignores_rule_with_error(self, mock_api):
-        self.exchange._set_current_timestamp(1000)
-
-        url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
-        exchange_rules = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
-            "result": [
-                {
-                    "name": self.ex_trading_pair,
-                    "alias": self.ex_trading_pair,
-                    "baseCurrency": "COINALPHA",
-                    "quoteCurrency": "USDT",
-                    "maxTradeAmount": "200",
-                    "category": 1
-                },
-            ]
-        }
-        mock_api.get(url, body=json.dumps(exchange_rules))
-
-        self.async_run_with_timeout(coroutine=self.exchange._update_trading_rules())
-
-        self.assertEqual(0, len(self.exchange._trading_rules))
-        self.assertTrue(
-            self._is_logged("ERROR", f"Error parsing the trading pair rule {self.ex_trading_pair}. Skipping.")
-        )
 
     def test_initial_status_dict(self):
         BybitAPIOrderBookDataSource._trading_pair_symbol_map = {}
@@ -363,33 +348,25 @@ class TestBybitExchange(unittest.TestCase):
         self._simulate_trading_rules_initialized()
         request_sent_event = asyncio.Event()
         self.exchange._set_current_timestamp(1640780000)
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
+        url = web_utils.rest_url(CONSTANTS.ORDER_CREATE_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
         creation_response = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
+            "retCode": 0,
+            "retMsg": "OK",
             "result": {
-                "accountId": "1",
-                "symbol": self.ex_trading_pair,
-                "symbolName": self.ex_trading_pair,
-                "orderLinkId": "162073788655749",
-                "orderId": "889208273689997824",
-                "transactTime": "1620737886573",
-                "price": "20000",
-                "origQty": "10",
-                "executedQty": "0",
-                "status": "NEW",
-                "timeInForce": "GTC",
-                "type": "LIMIT",
-                "side": "BUY"
-            }
+                "orderId": "1321003749386327552",
+                "orderLinkId": "OTD1"
+            },
+            "retExtInfo": {},
+            "time": 1672211918471
         }
-        tradingrule_url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
+        regex_tradingrule_url = re.compile(
+            f"^{tradingrule_url}".replace(".", r"\.").replace("?", r"\?"))
         resp = self.get_exchange_rules_mock()
-        mock_api.get(tradingrule_url, body=json.dumps(resp))
+
+        mock_api.get(regex_tradingrule_url, body=json.dumps(resp))
         mock_api.post(regex_url,
                       body=json.dumps(creation_response),
                       callback=lambda *args, **kwargs: request_sent_event.set())
@@ -405,14 +382,14 @@ class TestBybitExchange(unittest.TestCase):
 
         order_request = next(((key, value) for key, value in mock_api.requests.items()
                               if key[1].human_repr().startswith(url)))
-        self._validate_auth_credentials_present(order_request[1][0])
-        request_params = order_request[1][0].kwargs["params"]
-        self.assertEqual(self.ex_trading_pair, request_params["symbol"])
-        self.assertEqual("BUY", request_params["side"])
-        self.assertEqual("LIMIT", request_params["type"])
-        self.assertEqual(Decimal("100"), Decimal(request_params["qty"]))
-        self.assertEqual(Decimal("10000"), Decimal(request_params["price"]))
-        self.assertEqual("OID1", request_params["orderLinkId"])
+        self._validate_auth_credentials_present(order_request[1][0], RESTMethod.POST)
+        request_body = json.loads(order_request[1][0].kwargs["data"])
+        self.assertEqual(self.ex_trading_pair, request_body["symbol"])
+        self.assertEqual("Buy", request_body["side"])
+        self.assertEqual("Limit", request_body["orderType"])
+        self.assertEqual(Decimal("100"), Decimal(request_body["qty"]))
+        self.assertEqual(Decimal("10000"), Decimal(request_body["price"]))
+        self.assertEqual("OID1", request_body["orderLinkId"])
 
         self.assertIn("OID1", self.exchange.in_flight_orders)
         create_event: BuyOrderCreatedEvent = self.buy_order_created_logger.event_log[0]
@@ -432,112 +409,29 @@ class TestBybitExchange(unittest.TestCase):
         )
 
     @aioresponses()
-    def test_create_limit_maker_order_successfully(self, mock_api):
-        self._simulate_trading_rules_initialized()
-        request_sent_event = asyncio.Event()
-        self.exchange._set_current_timestamp(1640780000)
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
-        regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
-
-        creation_response = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
-            "result": {
-                "accountId": "1",
-                "symbol": self.ex_trading_pair,
-                "symbolName": self.ex_trading_pair,
-                "orderLinkId": "162073788655749",
-                "orderId": "889208273689997824",
-                "transactTime": "1620737886573",
-                "price": "20000",
-                "origQty": "10",
-                "executedQty": "0",
-                "status": "NEW",
-                "timeInForce": "GTC",
-                "type": "LIMIT_MAKER",
-                "side": "BUY"
-            }
-        }
-
-        tradingrule_url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
-        resp = self.get_exchange_rules_mock()
-        mock_api.get(tradingrule_url, body=json.dumps(resp))
-        mock_api.post(regex_url,
-                      body=json.dumps(creation_response),
-                      callback=lambda *args, **kwargs: request_sent_event.set())
-
-        self.test_task = asyncio.get_event_loop().create_task(
-            self.exchange._create_order(trade_type=TradeType.BUY,
-                                        order_id="OID1",
-                                        trading_pair=self.trading_pair,
-                                        amount=Decimal("100"),
-                                        order_type=OrderType.LIMIT_MAKER,
-                                        price=Decimal("10000")))
-        self.async_run_with_timeout(request_sent_event.wait())
-
-        order_request = next(((key, value) for key, value in mock_api.requests.items()
-                              if key[1].human_repr().startswith(url)))
-        self._validate_auth_credentials_present(order_request[1][0])
-        request_data = order_request[1][0].kwargs["params"]
-        self.assertEqual(self.ex_trading_pair, request_data["symbol"])
-        self.assertEqual(TradeType.BUY.name, request_data["side"])
-        self.assertEqual("LIMIT_MAKER", request_data["type"])
-        self.assertEqual(Decimal("100"), Decimal(request_data["qty"]))
-        self.assertEqual(Decimal("10000"), Decimal(request_data["price"]))
-        self.assertEqual("OID1", request_data["orderLinkId"])
-
-        self.assertIn("OID1", self.exchange.in_flight_orders)
-        create_event: BuyOrderCreatedEvent = self.buy_order_created_logger.event_log[0]
-        self.assertEqual(self.exchange.current_timestamp, create_event.timestamp)
-        self.assertEqual(self.trading_pair, create_event.trading_pair)
-        self.assertEqual(OrderType.LIMIT_MAKER, create_event.type)
-        self.assertEqual(Decimal("100"), create_event.amount)
-        self.assertEqual(Decimal("10000"), create_event.price)
-        self.assertEqual("OID1", create_event.order_id)
-        self.assertEqual(creation_response["result"]["orderId"], create_event.exchange_order_id)
-
-        self.assertTrue(
-            self._is_logged(
-                "INFO",
-                f"Created LIMIT_MAKER BUY order OID1 for {Decimal('100.000000')} {self.trading_pair}."
-            )
-        )
-
-    @aioresponses()
     @patch("hummingbot.connector.exchange.bybit.bybit_exchange.BybitExchange.get_price")
     def test_create_market_order_successfully(self, mock_api, get_price_mock):
         get_price_mock.return_value = Decimal(1000)
         self._simulate_trading_rules_initialized()
         request_sent_event = asyncio.Event()
         self.exchange._set_current_timestamp(1640780000)
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
+        url = web_utils.rest_url(CONSTANTS.ORDER_CREATE_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
         creation_response = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
+            "retCode": 0,
+            "retMsg": "OK",
             "result": {
-                "accountId": "1",
-                "symbol": self.ex_trading_pair,
-                "symbolName": self.ex_trading_pair,
-                "orderLinkId": "162073788655749",
-                "orderId": "889208273689997824",
-                "transactTime": "1620737886573",
-                "price": "20000",
-                "origQty": "10",
-                "executedQty": "0",
-                "status": "NEW",
-                "timeInForce": "GTC",
-                "type": "MARKET",
-                "side": "SELL"
-            }
+                "orderId": "1321003749386327552",
+                "orderLinkId": "OTD1"
+            },
+            "retExtInfo": {},
+            "time": 1672211918471
         }
-        tradingrule_url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
+        tradingrule_regex_url = re.compile(
+            f"^{tradingrule_url}".replace(".", r"\.").replace("?", r"\?"))
         resp = self.get_exchange_rules_mock()
-        mock_api.get(tradingrule_url, body=json.dumps(resp))
+        mock_api.get(tradingrule_regex_url, body=json.dumps(resp))
         mock_api.post(regex_url,
                       body=json.dumps(creation_response),
                       callback=lambda *args, **kwargs: request_sent_event.set())
@@ -552,14 +446,14 @@ class TestBybitExchange(unittest.TestCase):
 
         order_request = next(((key, value) for key, value in mock_api.requests.items()
                               if key[1].human_repr().startswith(url)))
-        self._validate_auth_credentials_present(order_request[1][0])
-        request_data = order_request[1][0].kwargs["params"]
-        self.assertEqual(self.ex_trading_pair, request_data["symbol"])
-        self.assertEqual(TradeType.SELL.name, request_data["side"])
-        self.assertEqual("MARKET", request_data["type"])
-        self.assertEqual(Decimal("100"), Decimal(request_data["qty"]))
-        self.assertEqual("OID1", request_data["orderLinkId"])
-        self.assertNotIn("price", request_data)
+        self._validate_auth_credentials_present(order_request[1][0], RESTMethod.POST)
+        request_body = json.loads(order_request[1][0].kwargs["data"])
+        self.assertEqual(self.ex_trading_pair, request_body["symbol"])
+        self.assertEqual("Sell", request_body["side"])
+        self.assertEqual("Market", request_body["orderType"])
+        self.assertEqual(Decimal("100"), Decimal(request_body["qty"]))
+        self.assertEqual("OID1", request_body["orderLinkId"])
+        self.assertNotIn("price", request_body)
 
         self.assertIn("OID1", self.exchange.in_flight_orders)
         create_event: SellOrderCreatedEvent = self.sell_order_created_logger.event_log[0]
@@ -582,11 +476,12 @@ class TestBybitExchange(unittest.TestCase):
         self._simulate_trading_rules_initialized()
         request_sent_event = asyncio.Event()
         self.exchange._set_current_timestamp(1640780000)
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
+        url = web_utils.rest_url(CONSTANTS.ORDER_CREATE_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
-        tradingrule_url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
+        tr_regex_url = re.compile(f"^{tradingrule_url}".replace(".", r"\.").replace("?", r"\?"))
         resp = self.get_exchange_rules_mock()
-        mock_api.get(tradingrule_url, body=json.dumps(resp))
+        mock_api.get(tr_regex_url, body=json.dumps(resp))
         mock_api.post(regex_url,
                       status=400,
                       callback=lambda *args, **kwargs: request_sent_event.set())
@@ -602,7 +497,7 @@ class TestBybitExchange(unittest.TestCase):
 
         order_request = next(((key, value) for key, value in mock_api.requests.items()
                               if key[1].human_repr().startswith(url)))
-        self._validate_auth_credentials_present(order_request[1][0])
+        self._validate_auth_credentials_present(order_request[1][0], RESTMethod.POST)
 
         self.assertNotIn("OID1", self.exchange.in_flight_orders)
         self.assertEquals(0, len(self.buy_order_created_logger.event_log))
@@ -626,11 +521,12 @@ class TestBybitExchange(unittest.TestCase):
         request_sent_event = asyncio.Event()
         self.exchange._set_current_timestamp(1640780000)
 
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
+        url = web_utils.rest_url(CONSTANTS.ORDER_CREATE_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
-        tradingrule_url = web_utils.rest_url(CONSTANTS.EXCHANGE_INFO_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
+        tr_regex_url = re.compile(f"^{tradingrule_url}".replace(".", r"\.").replace("?", r"\?"))
         resp = self.get_exchange_rules_mock()
-        mock_api.get(tradingrule_url, body=json.dumps(resp))
+        mock_api.get(tr_regex_url, body=json.dumps(resp))
         mock_api.post(regex_url,
                       status=400,
                       callback=lambda *args, **kwargs: request_sent_event.set())
@@ -695,40 +591,35 @@ class TestBybitExchange(unittest.TestCase):
         self.assertIn("OID1", self.exchange.in_flight_orders)
         order = self.exchange.in_flight_orders["OID1"]
 
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
+        url = web_utils.rest_url(CONSTANTS.ORDER_CANCEL_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
-
         response = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
+            "retCode": 0,
+            "retMsg": "OK",
             "result": {
-                "accountId": "10054",
-                "symbol": self.ex_trading_pair,
-                "orderLinkId": "OID1",
-                "orderId": "4",
-                "transactTime": "1620811601728",
-                "price": "10000",
-                "origQty": "100",
-                "executedQty": "0",
-                "status": "CANCELED",
-                "timeInForce": "GTC",
-                "type": "LIMIT",
-                "side": "BUY"
-            }
+                "orderId": "c6f055d9-7f21-4079-913d-e6523a9cfffa",
+                "orderLinkId": "OID1"
+            },
+            "retExtInfo": {},
+            "time": 1672217377164
         }
 
-        mock_api.delete(regex_url,
-                        body=json.dumps(response),
-                        callback=lambda *args, **kwargs: request_sent_event.set())
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
+        regex_tradingrule_url = re.compile(
+            f"^{tradingrule_url}".replace(".", r"\.").replace("?", r"\?"))
+        resp = self.get_exchange_rules_mock()
+
+        mock_api.get(regex_tradingrule_url, body=json.dumps(resp))
+        mock_api.post(regex_url,
+                      body=json.dumps(response),
+                      callback=lambda *args, **kwargs: request_sent_event.set())
 
         self.exchange.cancel(client_order_id="OID1", trading_pair=self.trading_pair)
         self.async_run_with_timeout(request_sent_event.wait())
 
         cancel_request = next(((key, value) for key, value in mock_api.requests.items()
                                if key[1].human_repr().startswith(url)))
-        self._validate_auth_credentials_present(cancel_request[1][0])
+        self._validate_auth_credentials_present(cancel_request[1][0], RESTMethod.POST)
 
         cancel_event: OrderCancelledEvent = self.order_cancelled_logger.event_log[0]
         self.assertEqual(self.exchange.current_timestamp, cancel_event.timestamp)
@@ -759,19 +650,27 @@ class TestBybitExchange(unittest.TestCase):
         self.assertIn("OID1", self.exchange.in_flight_orders)
         order = self.exchange.in_flight_orders["OID1"]
 
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
+        url = web_utils.rest_url(CONSTANTS.ORDER_CANCEL_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
-        mock_api.delete(regex_url,
-                        status=400,
-                        callback=lambda *args, **kwargs: request_sent_event.set())
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
+        regex_tradingrule_url = re.compile(
+            f"^{tradingrule_url}".replace(".", r"\.").replace("?", r"\?"))
+        resp = self.get_exchange_rules_mock()
+
+        mock_api.get(regex_tradingrule_url, body=json.dumps(resp))
+        mock_api.post(
+            regex_url,
+            status=400,
+            callback=lambda *args, **kwargs: request_sent_event.set(),
+        )
 
         self.exchange.cancel(client_order_id="OID1", trading_pair=self.trading_pair)
         self.async_run_with_timeout(request_sent_event.wait())
 
         cancel_request = next(((key, value) for key, value in mock_api.requests.items()
                                if key[1].human_repr().startswith(url)))
-        self._validate_auth_credentials_present(cancel_request[1][0])
+        self._validate_auth_credentials_present(cancel_request[1][0], RESTMethod.POST)
 
         self.assertEquals(0, len(self.order_cancelled_logger.event_log))
 
@@ -812,36 +711,33 @@ class TestBybitExchange(unittest.TestCase):
         self.assertIn("OID2", self.exchange.in_flight_orders)
         order2 = self.exchange.in_flight_orders["OID2"]
 
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
+        regex_tradingrule_url = re.compile(
+            f"^{tradingrule_url}".replace(".", r"\.").replace("?", r"\?"))
+        resp = self.get_exchange_rules_mock()
+
+        url = web_utils.rest_url(CONSTANTS.ORDER_CANCEL_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
         response = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
+            "retCode": 0,
+            "retMsg": "OK",
             "result": {
-                "accountId": "10054",
-                "symbol": self.ex_trading_pair,
-                "orderLinkId": order1.client_order_id,
                 "orderId": order1.exchange_order_id,
-                "transactTime": "1620811601728",
-                "price": float(order1.price),
-                "origQty": float(order1.amount),
-                "executedQty": "0",
-                "status": "CANCELED",
-                "timeInForce": "GTC",
-                "type": "LIMIT",
-                "side": "BUY"
-            }
+                "orderLinkId": order1.client_order_id,
+            },
+            "retExtInfo": {},
+            "time": 1672217377164,
         }
 
-        mock_api.delete(regex_url, body=json.dumps(response))
+        mock_api.get(regex_tradingrule_url, body=json.dumps(resp))
+        mock_api.post(regex_url, body=json.dumps(response))
 
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
+        url = web_utils.rest_url(CONSTANTS.ORDER_CANCEL_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
-        mock_api.delete(regex_url, status=400)
+        mock_api.get(regex_tradingrule_url, body=json.dumps(resp))
+        mock_api.post(regex_url, status=400)
 
         cancellation_results = self.async_run_with_timeout(self.exchange.cancel_all(10))
 
@@ -871,19 +767,21 @@ class TestBybitExchange(unittest.TestCase):
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
         response = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
+            "retCode": 0,
+            "retMsg": "OK",
             "result": {
-                "serverTime": 1625799317787
-            }
+                "timeSecond": "1688639403",
+                "timeNano": "1688639403423213947"
+            },
+            "retExtInfo": {},
+            "time": 1688639403423
         }
 
         mock_api.get(regex_url, body=json.dumps(response))
 
         self.async_run_with_timeout(self.exchange._update_time_synchronizer())
-        self.assertEqual(response["result"]['serverTime'] * 1e-3, self.exchange._time_synchronizer.time())
+        self.assertEqual(float(response["result"]['timeNano']) * 1e-9,
+                         self.exchange._time_synchronizer.time())
 
     @aioresponses()
     def test_update_time_synchronizer_failure_is_logged(self, mock_api):
@@ -891,8 +789,8 @@ class TestBybitExchange(unittest.TestCase):
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
         response = {
-            "code": "-1",
-            "msg": "error"
+            "retCode": "-1",
+            "retMsg": "error"
         }
 
         mock_api.get(regex_url, body=json.dumps(response))
@@ -914,34 +812,73 @@ class TestBybitExchange(unittest.TestCase):
 
     @aioresponses()
     def test_update_balances(self, mock_api):
-        url = web_utils.rest_url(CONSTANTS.ACCOUNTS_PATH_URL)
+        url = web_utils.rest_url(CONSTANTS.WALLET_BALANCE_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
         response = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
+            "retCode": 0,
+            "retMsg": "OK",
             "result": {
-                "balances": [
+                "list": [
                     {
-                        "coin": "COINALPHA",
-                        "coinId": "COINALPHA",
-                        "coinName": "COINALPHA",
-                        "total": "15",
-                        "free": "10",
-                        "locked": "0"
-                    },
-                    {
-                        "coin": "USDT",
-                        "coinId": "USDT",
-                        "coinName": "USDT",
-                        "total": "2000",
-                        "free": "2000",
-                        "locked": "0"
+                        "totalEquity": "3.31216591",
+                        "accountIMRate": "0",
+                        "totalMarginBalance": "3.00326056",
+                        "totalInitialMargin": "0",
+                        "accountType": "CLASSIC",
+                        "totalAvailableBalance": "3.00326056",
+                        "accountMMRate": "0",
+                        "totalPerpUPL": "0",
+                        "totalWalletBalance": "3.00326056",
+                        "accountLTV": "0",
+                        "totalMaintenanceMargin": "0",
+                        "coin": [
+                            {
+                                "availableToBorrow": "3",
+                                "bonus": "0",
+                                "accruedInterest": "0",
+                                "availableToWithdraw": "0",
+                                "totalOrderIM": "0",
+                                "equity": "0",
+                                "totalPositionMM": "0",
+                                "usdValue": "0",
+                                "unrealisedPnl": "0",
+                                "collateralSwitch": True,
+                                "borrowAmount": "0.0",
+                                "totalPositionIM": "0",
+                                "walletBalance": "15",
+                                "free": "10",
+                                "cumRealisedPnl": "0",
+                                "locked": "0",
+                                "marginCollateral": True,
+                                "coin": "COINALPHA"
+                            },
+                            {
+                                "availableToBorrow": "3",
+                                "bonus": "0",
+                                "accruedInterest": "0",
+                                "availableToWithdraw": "0",
+                                "totalOrderIM": "0",
+                                "equity": "0",
+                                "totalPositionMM": "0",
+                                "usdValue": "0",
+                                "unrealisedPnl": "0",
+                                "collateralSwitch": True,
+                                "borrowAmount": "0.0",
+                                "totalPositionIM": "0",
+                                "walletBalance": "2000",
+                                "free": "2000",
+                                "cumRealisedPnl": "0",
+                                "locked": "0",
+                                "marginCollateral": True,
+                                "coin": "USDT"
+                            },
+                        ]
                     }
                 ]
-            }
+            },
+            "retExtInfo": {},
+            "time": 1690872862481
         }
 
         mock_api.get(regex_url, body=json.dumps(response))
@@ -956,22 +893,49 @@ class TestBybitExchange(unittest.TestCase):
         self.assertEqual(Decimal("2000"), total_balances["USDT"])
 
         response = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
+            "retCode": 0,
+            "retMsg": "OK",
             "result": {
-                "balances": [
+                "list": [
                     {
-                        "coin": "COINALPHA",
-                        "coinId": "COINALPHA",
-                        "coinName": "COINALPHA",
-                        "total": "15",
-                        "free": "10",
-                        "locked": "0"
-                    },
+                        "totalEquity": "3.31216591",
+                        "accountIMRate": "0",
+                        "totalMarginBalance": "3.00326056",
+                        "totalInitialMargin": "0",
+                        "accountType": "CLASSIC",
+                        "totalAvailableBalance": "3.00326056",
+                        "accountMMRate": "0",
+                        "totalPerpUPL": "0",
+                        "totalWalletBalance": "3.00326056",
+                        "accountLTV": "0",
+                        "totalMaintenanceMargin": "0",
+                        "coin": [
+                            {
+                                "availableToBorrow": "3",
+                                "bonus": "0",
+                                "accruedInterest": "0",
+                                "availableToWithdraw": "0",
+                                "totalOrderIM": "0",
+                                "equity": "0",
+                                "totalPositionMM": "0",
+                                "usdValue": "0",
+                                "unrealisedPnl": "0",
+                                "collateralSwitch": True,
+                                "borrowAmount": "0.0",
+                                "totalPositionIM": "0",
+                                "walletBalance": "15",
+                                "free": "10",
+                                "cumRealisedPnl": "0",
+                                "locked": "0",
+                                "marginCollateral": True,
+                                "coin": "COINALPHA"
+                            },
+                        ]
+                    }
                 ]
-            }
+            },
+            "retExtInfo": {},
+            "time": 1690872862481
         }
 
         mock_api.get(regex_url, body=json.dumps(response))
@@ -1002,38 +966,70 @@ class TestBybitExchange(unittest.TestCase):
         )
         order: InFlightOrder = self.exchange.in_flight_orders["OID1"]
 
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
+        regex_tradingrule_url = re.compile(
+            f"^{tradingrule_url}".replace(".", r"\.").replace("?", r"\?"))
+        resp = self.get_exchange_rules_mock()
+        mock_api.get(regex_tradingrule_url, body=json.dumps(resp))
+
+        url = web_utils.rest_url(CONSTANTS.ORDER_GET_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
         order_status = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
+            "retCode": 0,
+            "retMsg": "OK",
             "result": {
-                "accountId": "1054",
-                "exchangeId": "301",
-                "symbol": self.trading_pair,
-                "symbolName": "ETHUSDT",
-                "orderLinkId": order.client_order_id,
-                "orderId": order.exchange_order_id,
-                "price": "20000",
-                "origQty": "1",
-                "executedQty": "1",
-                "cummulativeQuoteQty": "1",
-                "avgPrice": "1000",
-                "status": "FILLED",
-                "timeInForce": "GTC",
-                "type": "LIMIT",
-                "side": order.trade_type.name,
-                "stopPrice": "0.0",
-                "icebergQty": "0.0",
-                "time": "1620811601728",
-                "updateTime": "1620811601743",
-                "isWorking": True
-            }
+                "list": [
+                    {
+                        "orderId": order.exchange_order_id,
+                        "orderLinkId": order.client_order_id,
+                        "blockTradeId": "",
+                        "symbol": self.trading_pair,
+                        "price": "1600.00",
+                        "qty": "0.10",
+                        "side": "Buy",
+                        "isLeverage": "",
+                        "positionIdx": 1,
+                        "orderStatus": "Filled",
+                        "cancelType": "UNKNOWN",
+                        "rejectReason": "EC_NoError",
+                        "avgPrice": "0",
+                        "leavesQty": "0.10",
+                        "leavesValue": "160",
+                        "cumExecQty": "0.00",
+                        "cumExecValue": "0",
+                        "cumExecFee": "0",
+                        "timeInForce": "GTC",
+                        "orderType": "Limit",
+                        "stopOrderType": "UNKNOWN",
+                        "orderIv": "",
+                        "triggerPrice": "0.00",
+                        "takeProfit": "2500.00",
+                        "stopLoss": "1500.00",
+                        "tpTriggerBy": "LastPrice",
+                        "slTriggerBy": "LastPrice",
+                        "triggerDirection": 0,
+                        "triggerBy": "UNKNOWN",
+                        "lastPriceOnCreated": "",
+                        "reduceOnly": False,
+                        "closeOnTrigger": False,
+                        "smpType": "None",
+                        "smpGroup": 0,
+                        "smpOrderId": "",
+                        "tpslMode": "Full",
+                        "tpLimitPrice": "",
+                        "slLimitPrice": "",
+                        "placeType": "",
+                        "createdTime": "1684738540559",
+                        "updatedTime": "1684738540561"
+                    }
+                ],
+                "nextPageCursor": "page_args%3Dfd4300ae-7847-404e-b947-b46980a4d140%26symbol%3D6%26",
+                "category": "linear"
+            },
+            "retExtInfo": {},
+            "time": 1684765770483
         }
-
         mock_api.get(regex_url, body=json.dumps(order_status))
 
         # Simulate the order has been filled with a TradeUpdate
@@ -1082,38 +1078,70 @@ class TestBybitExchange(unittest.TestCase):
         )
         order = self.exchange.in_flight_orders["OID1"]
 
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
+        regex_tradingrule_url = re.compile(
+            f"^{tradingrule_url}".replace(".", r"\.").replace("?", r"\?"))
+        resp = self.get_exchange_rules_mock()
+        mock_api.get(regex_tradingrule_url, body=json.dumps(resp))
+
+        url = web_utils.rest_url(CONSTANTS.ORDER_GET_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
         order_status = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
+            "retCode": 0,
+            "retMsg": "OK",
             "result": {
-                "accountId": "1054",
-                "exchangeId": "301",
-                "symbol": self.trading_pair,
-                "symbolName": "ETHUSDT",
-                "orderLinkId": order.client_order_id,
-                "orderId": order.exchange_order_id,
-                "price": "10000",
-                "origQty": "1",
-                "executedQty": "1",
-                "cummulativeQuoteQty": "1",
-                "avgPrice": "1000",
-                "status": "CANCELED",
-                "timeInForce": "GTC",
-                "type": "LIMIT",
-                "side": order.trade_type.name,
-                "stopPrice": "0.0",
-                "icebergQty": "0.0",
-                "time": "1620811601728",
-                "updateTime": "1620811601743",
-                "isWorking": True
-            }
+                "list": [
+                    {
+                        "orderId": order.exchange_order_id,
+                        "orderLinkId": order.client_order_id,
+                        "blockTradeId": "",
+                        "symbol": self.trading_pair,
+                        "price": "1600.00",
+                        "qty": "0.10",
+                        "side": "Buy",
+                        "isLeverage": "",
+                        "positionIdx": 1,
+                        "orderStatus": "Cancelled",
+                        "cancelType": "UNKNOWN",
+                        "rejectReason": "EC_NoError",
+                        "avgPrice": "0",
+                        "leavesQty": "0.10",
+                        "leavesValue": "160",
+                        "cumExecQty": "0.00",
+                        "cumExecValue": "0",
+                        "cumExecFee": "0",
+                        "timeInForce": "GTC",
+                        "orderType": "Limit",
+                        "stopOrderType": "UNKNOWN",
+                        "orderIv": "",
+                        "triggerPrice": "0.00",
+                        "takeProfit": "2500.00",
+                        "stopLoss": "1500.00",
+                        "tpTriggerBy": "LastPrice",
+                        "slTriggerBy": "LastPrice",
+                        "triggerDirection": 0,
+                        "triggerBy": "UNKNOWN",
+                        "lastPriceOnCreated": "",
+                        "reduceOnly": False,
+                        "closeOnTrigger": False,
+                        "smpType": "None",
+                        "smpGroup": 0,
+                        "smpOrderId": "",
+                        "tpslMode": "Full",
+                        "tpLimitPrice": "",
+                        "slLimitPrice": "",
+                        "placeType": "",
+                        "createdTime": "1684738540559",
+                        "updatedTime": "1684738540561"
+                    }
+                ],
+                "nextPageCursor": "page_args%3Dfd4300ae-7847-404e-b947-b46980a4d140%26symbol%3D6%26",
+                "category": "linear"
+            },
+            "retExtInfo": {},
+            "time": 1684765770483
         }
-
         mock_api.get(regex_url, body=json.dumps(order_status))
 
         self.async_run_with_timeout(self.exchange._update_order_status())
@@ -1148,36 +1176,69 @@ class TestBybitExchange(unittest.TestCase):
         )
         order: InFlightOrder = self.exchange.in_flight_orders["OID1"]
 
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
+        regex_tradingrule_url = re.compile(
+            f"^{tradingrule_url}".replace(".", r"\.").replace("?", r"\?"))
+        resp = self.get_exchange_rules_mock()
+        mock_api.get(regex_tradingrule_url, body=json.dumps(resp))
+
+        url = web_utils.rest_url(CONSTANTS.ORDER_GET_PATH_URL)
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
 
         order_status = {
-            "ret_code": 0,
-            "ret_msg": "",
-            "ext_code": None,
-            "ext_info": None,
+            "retCode": 0,
+            "retMsg": "OK",
             "result": {
-                "accountId": "1054",
-                "exchangeId": "301",
-                "symbol": self.trading_pair,
-                "symbolName": "ETHUSDT",
-                "orderLinkId": order.client_order_id,
-                "orderId": order.exchange_order_id,
-                "price": "10000",
-                "origQty": "1",
-                "executedQty": "1",
-                "cummulativeQuoteQty": "1",
-                "avgPrice": "1000",
-                "status": "NEW",
-                "timeInForce": "GTC",
-                "type": "LIMIT",
-                "side": order.trade_type.name,
-                "stopPrice": "0.0",
-                "icebergQty": "0.0",
-                "time": "1620811601728",
-                "updateTime": "1620811601743",
-                "isWorking": True
-            }
+                "list": [
+                    {
+                        "orderId": order.exchange_order_id,
+                        "orderLinkId": order.client_order_id,
+                        "blockTradeId": "",
+                        "symbol": self.trading_pair,
+                        "price": "1600.00",
+                        "qty": "0.10",
+                        "side": "Buy",
+                        "isLeverage": "",
+                        "positionIdx": 1,
+                        "orderStatus": "New",
+                        "cancelType": "UNKNOWN",
+                        "rejectReason": "EC_NoError",
+                        "avgPrice": "0",
+                        "leavesQty": "0.10",
+                        "leavesValue": "160",
+                        "cumExecQty": "0.00",
+                        "cumExecValue": "0",
+                        "cumExecFee": "0",
+                        "timeInForce": "GTC",
+                        "orderType": "Limit",
+                        "stopOrderType": "UNKNOWN",
+                        "orderIv": "",
+                        "triggerPrice": "0.00",
+                        "takeProfit": "2500.00",
+                        "stopLoss": "1500.00",
+                        "tpTriggerBy": "LastPrice",
+                        "slTriggerBy": "LastPrice",
+                        "triggerDirection": 0,
+                        "triggerBy": "UNKNOWN",
+                        "lastPriceOnCreated": "",
+                        "reduceOnly": False,
+                        "closeOnTrigger": False,
+                        "smpType": "None",
+                        "smpGroup": 0,
+                        "smpOrderId": "",
+                        "tpslMode": "Full",
+                        "tpLimitPrice": "",
+                        "slLimitPrice": "",
+                        "placeType": "",
+                        "createdTime": "1684738540559",
+                        "updatedTime": "1684738540561"
+                    }
+                ],
+                "nextPageCursor": "page_args%3Dfd4300ae-7847-404e-b947-b46980a4d140%26symbol%3D6%26",
+                "category": "linear"
+            },
+            "retExtInfo": {},
+            "time": 1684765770483
         }
 
         mock_response = order_status
@@ -1212,9 +1273,14 @@ class TestBybitExchange(unittest.TestCase):
         )
         order: InFlightOrder = self.exchange.in_flight_orders["OID1"]
 
-        url = web_utils.rest_url(CONSTANTS.ORDER_PATH_URL)
-        regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
+        tradingrule_url = web_utils.rest_url(CONSTANTS.INSTRUMENTS_INFO_PATH_URL)
+        regex_tradingrule_url = re.compile(
+            f"^{tradingrule_url}".replace(".", r"\.").replace("?", r"\?"))
+        resp = self.get_exchange_rules_mock()
+        mock_api.get(regex_tradingrule_url, body=json.dumps(resp))
 
+        url = web_utils.rest_url(CONSTANTS.ORDER_GET_PATH_URL)
+        regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
         mock_api.get(regex_url, status=404)
 
         self.async_run_with_timeout(self.exchange._update_order_status())
@@ -1227,9 +1293,10 @@ class TestBybitExchange(unittest.TestCase):
         self.assertFalse(order.is_filled)
         self.assertFalse(order.is_done)
 
-        self.assertEqual(1, self.exchange._order_tracker._order_not_found_records[order.client_order_id])
+        self.assertEqual(1, self.exchange._order_tracker._order_not_found_records[
+            order.client_order_id])
 
-    def test_user_stream_update_for_new_order_does_not_update_status(self):
+    def test_user_stream_update_for_new_order(self):
         self.exchange._set_current_timestamp(1640780000)
         self.exchange.start_tracking_order(
             order_id="OID1",
@@ -1243,31 +1310,55 @@ class TestBybitExchange(unittest.TestCase):
         order = self.exchange.in_flight_orders["OID1"]
 
         event_message = {
-            "e": "executionReport",
-            "E": "1499405658658",
-            "s": order.trading_pair,
-            "c": order.client_order_id,
-            "S": order.trade_type.name,
-            "o": "LIMIT",
-            "f": "GTC",
-            "q": "1.00000000",
-            "p": "0.10264410",
-            "X": "NEW",
-            "i": order.exchange_order_id,
-            "M": "0",
-            "l": "0.00000000",
-            "z": "0.00000000",
-            "L": "0.00000000",
-            "n": "0",
-            "N": "COINALPHA",
-            "u": True,
-            "w": True,
-            "m": False,
-            "O": "1499405658657",
-            "Z": "473.199",
-            "A": "0",
-            "C": False,
-            "v": "0"
+            "id": "5923240c6880ab-c59f-420b-9adb-3639adc9dd90",
+            "topic": "order",
+            "creationTime": 1672364262474,
+            "data": [
+                {
+                    "symbol": order.trading_pair,
+                    "orderId": order.exchange_order_id,
+                    "side": "Buy",
+                    "orderType": "Market",
+                    "cancelType": "UNKNOWN",
+                    "price": "72.5",
+                    "qty": "1",
+                    "orderIv": "",
+                    "timeInForce": "IOC",
+                    "orderStatus": "New",
+                    "orderLinkId": order.client_order_id,
+                    "lastPriceOnCreated": "",
+                    "reduceOnly": False,
+                    "leavesQty": "",
+                    "leavesValue": "",
+                    "cumExecQty": "1",
+                    "cumExecValue": "75",
+                    "avgPrice": "75",
+                    "blockTradeId": "",
+                    "positionIdx": 0,
+                    "cumExecFee": "0.358635",
+                    "createdTime": "1672364262444",
+                    "updatedTime": "1672364262457",
+                    "rejectReason": "EC_NoError",
+                    "stopOrderType": "",
+                    "tpslMode": "",
+                    "triggerPrice": "",
+                    "takeProfit": "",
+                    "stopLoss": "",
+                    "tpTriggerBy": "",
+                    "slTriggerBy": "",
+                    "tpLimitPrice": "",
+                    "slLimitPrice": "",
+                    "triggerDirection": 0,
+                    "triggerBy": "",
+                    "closeOnTrigger": False,
+                    "category": "option",
+                    "placeType": "price",
+                    "smpType": "None",
+                    "smpGroup": 0,
+                    "smpOrderId": "",
+                    "feeCurrency": ""
+                }
+            ]
         }
 
         mock_queue = AsyncMock()
@@ -1311,31 +1402,55 @@ class TestBybitExchange(unittest.TestCase):
         order = self.exchange.in_flight_orders["OID1"]
 
         event_message = {
-            "e": "executionReport",
-            "E": "1499405658658",
-            "s": order.trading_pair,
-            "c": order.client_order_id,
-            "S": order.trade_type.name,
-            "o": "LIMIT",
-            "f": "GTC",
-            "q": "1.00000000",
-            "p": "0.10264410",
-            "X": "CANCELED",
-            "i": order.exchange_order_id,
-            "M": "0",
-            "l": "0.00000000",
-            "z": "0.00000000",
-            "L": "0.00000000",
-            "n": "0",
-            "N": "COINALPHA",
-            "u": True,
-            "w": True,
-            "m": False,
-            "O": "1499405658657",
-            "Z": "473.199",
-            "A": "0",
-            "C": False,
-            "v": "0"
+            "id": "5923240c6880ab-c59f-420b-9adb-3639adc9dd90",
+            "topic": "order",
+            "creationTime": 1672364262474,
+            "data": [
+                {
+                    "symbol": order.trading_pair,
+                    "orderId": order.exchange_order_id,
+                    "side": "Buy",
+                    "orderType": "Market",
+                    "cancelType": "UNKNOWN",
+                    "price": "72.5",
+                    "qty": "1",
+                    "orderIv": "",
+                    "timeInForce": "IOC",
+                    "orderStatus": "Cancelled",
+                    "orderLinkId": order.client_order_id,
+                    "lastPriceOnCreated": "",
+                    "reduceOnly": False,
+                    "leavesQty": "",
+                    "leavesValue": "",
+                    "cumExecQty": "1",
+                    "cumExecValue": "75",
+                    "avgPrice": "75",
+                    "blockTradeId": "",
+                    "positionIdx": 0,
+                    "cumExecFee": "0.358635",
+                    "createdTime": "1672364262444",
+                    "updatedTime": "1672364262457",
+                    "rejectReason": "EC_NoError",
+                    "stopOrderType": "",
+                    "tpslMode": "",
+                    "triggerPrice": "",
+                    "takeProfit": "",
+                    "stopLoss": "",
+                    "tpTriggerBy": "",
+                    "slTriggerBy": "",
+                    "tpLimitPrice": "",
+                    "slLimitPrice": "",
+                    "triggerDirection": 0,
+                    "triggerBy": "",
+                    "closeOnTrigger": False,
+                    "category": "option",
+                    "placeType": "price",
+                    "smpType": "None",
+                    "smpGroup": 0,
+                    "smpOrderId": "",
+                    "feeCurrency": ""
+                }
+            ]
         }
 
         mock_queue = AsyncMock()
@@ -1372,37 +1487,98 @@ class TestBybitExchange(unittest.TestCase):
         )
         order = self.exchange.in_flight_orders["OID1"]
 
-        event_message = {
-            "e": "executionReport",
-            "t": "1499405658658",
-            "E": "1499405658658",
-            "s": order.trading_pair,
-            "c": order.client_order_id,
-            "S": order.trade_type.name,
-            "o": "LIMIT",
-            "f": "GTC",
-            "q": order.amount,
-            "p": order.price,
-            "X": "PARTIALLY_FILLED",
-            "i": order.exchange_order_id,
-            "M": "0",
-            "l": "0.50000000",
-            "z": "0.50000000",
-            "L": "0.10250000",
-            "n": "0.003",
-            "N": self.base_asset,
-            "u": True,
-            "w": True,
-            "m": False,
-            "O": "1499405658657",
-            "Z": "473.199",
-            "A": "0",
-            "C": False,
-            "v": "0"
+        trade_event_message = {
+            "id": "592324803b2785-26fa-4214-9963-bdd4727f07be",
+            "topic": "execution",
+            "creationTime": 1672364174455,
+            "data": [
+                {
+                    "category": "spot",
+                    "symbol": order.trading_pair,
+                    "execFee": "0.003",
+                    "execId": "7e2ae69c-4edf-5800-a352-893d52b446aa",
+                    "execPrice": "0.10250000",
+                    "execQty": "0.50000000",
+                    "execType": "Trade",
+                    "execValue": "8.435",
+                    "isMaker": False,
+                    "feeRate": "0.0006",
+                    "tradeIv": "",
+                    "markIv": "",
+                    "blockTradeId": "",
+                    "markPrice": "0.3391",
+                    "indexPrice": "",
+                    "underlyingPrice": "",
+                    "leavesQty": "0",
+                    "orderId": order.exchange_order_id,
+                    "orderLinkId": order.client_order_id,
+                    "orderPrice": "0.3207",
+                    "orderQty": "25",
+                    "orderType": "Market",
+                    "stopOrderType": "UNKNOWN",
+                    "side": "Sell",
+                    "execTime": "1672364174443",
+                    "isLeverage": "0",
+                    "closedSize": ""
+                }
+            ]
+        }
+        trade_data = trade_event_message["data"][0]
+
+        order_event_message = {
+            "id": "5923240c6880ab-c59f-420b-9adb-3639adc9dd90",
+            "topic": "order",
+            "creationTime": 1672364262474,
+            "data": [
+                {
+                    "symbol": order.trading_pair,
+                    "orderId": order.exchange_order_id,
+                    "side": "Buy",
+                    "orderType": "Market",
+                    "cancelType": "UNKNOWN",
+                    "price": "72.5",
+                    "qty": "1",
+                    "orderIv": "",
+                    "timeInForce": "IOC",
+                    "orderStatus": "PartiallyFilled",
+                    "orderLinkId": order.client_order_id,
+                    "lastPriceOnCreated": "",
+                    "reduceOnly": False,
+                    "leavesQty": "",
+                    "leavesValue": "",
+                    "cumExecQty": "1",
+                    "cumExecValue": "75",
+                    "avgPrice": "75",
+                    "blockTradeId": "",
+                    "positionIdx": 0,
+                    "cumExecFee": "0.358635",
+                    "createdTime": "1672364262444",
+                    "updatedTime": "1672364262457",
+                    "rejectReason": "EC_NoError",
+                    "stopOrderType": "",
+                    "tpslMode": "",
+                    "triggerPrice": "",
+                    "takeProfit": "",
+                    "stopLoss": "",
+                    "tpTriggerBy": "",
+                    "slTriggerBy": "",
+                    "tpLimitPrice": "",
+                    "slLimitPrice": "",
+                    "triggerDirection": 0,
+                    "triggerBy": "",
+                    "closeOnTrigger": False,
+                    "category": "option",
+                    "placeType": "price",
+                    "smpType": "None",
+                    "smpGroup": 0,
+                    "smpOrderId": "",
+                    "feeCurrency": ""
+                }
+            ]
         }
 
         mock_queue = AsyncMock()
-        mock_queue.get.side_effect = [event_message, asyncio.CancelledError]
+        mock_queue.get.side_effect = [trade_event_message, order_event_message, asyncio.CancelledError]
         self.exchange._user_stream_tracker._user_stream = mock_queue
 
         try:
@@ -1419,17 +1595,23 @@ class TestBybitExchange(unittest.TestCase):
         self.assertEqual(order.trading_pair, fill_event.trading_pair)
         self.assertEqual(order.trade_type, fill_event.trade_type)
         self.assertEqual(order.order_type, fill_event.order_type)
-        self.assertEqual(Decimal(event_message["L"]), fill_event.price)
-        self.assertEqual(Decimal(event_message["l"]), fill_event.amount)
+        self.assertEqual(Decimal(trade_data["execPrice"]), fill_event.price)
+        self.assertEqual(Decimal(trade_data["execQty"]), fill_event.amount)
 
-        self.assertEqual([TokenAmount(amount=Decimal(event_message["n"]), token=(event_message["N"]))],
-                         fill_event.trade_fee.flat_fees)
+        self.assertEqual(
+            [TokenAmount(
+                amount=Decimal(trade_data["execFee"]),
+                token=self.quote_asset,
+            )
+            ],
+            fill_event.trade_fee.flat_fees)
 
         self.assertEqual(0, len(self.buy_order_completed_logger.event_log))
 
         self.assertTrue(
-            self._is_logged("INFO", f"The {order.trade_type.name} order {order.client_order_id} amounting to "
-                                    f"{fill_event.amount}/{order.amount} {order.base_asset} has been filled.")
+            self._is_logged("INFO",
+                            f"The {order.trade_type.name} order {order.client_order_id} amounting to "
+                            f"{fill_event.amount}/{order.amount} {order.base_asset} has been filled.")
         )
 
     def test_user_stream_update_for_order_fill(self):
@@ -1445,53 +1627,98 @@ class TestBybitExchange(unittest.TestCase):
         )
         order = self.exchange.in_flight_orders["OID1"]
 
-        event_message = {
-            "e": "executionReport",
-            "t": "1499405658658",
-            "E": "1499405658658",
-            "s": order.trading_pair,
-            "c": order.client_order_id,
-            "S": order.trade_type.name,
-            "o": "LIMIT",
-            "f": "GTC",
-            "q": order.amount,
-            "p": order.price,
-            "X": "FILLED",
-            "i": order.exchange_order_id,
-            "M": "0",
-            "l": order.amount,
-            "z": "0.50000000",
-            "L": order.price,
-            "n": "0.003",
-            "N": self.base_asset,
-            "u": True,
-            "w": True,
-            "m": False,
-            "O": "1499405658657",
-            "Z": "473.199",
-            "A": "0",
-            "C": False,
-            "v": "0"
+        trade_event_message = {
+            "id": "592324803b2785-26fa-4214-9963-bdd4727f07be",
+            "topic": "execution",
+            "creationTime": 1672364174455,
+            "data": [
+                {
+                    "category": "spot",
+                    "symbol": order.trading_pair,
+                    "execFee": "0.003",
+                    "execId": "7e2ae69c-4edf-5800-a352-893d52b446aa",
+                    "execPrice": order.price,
+                    "execQty": order.amount,
+                    "execType": "Trade",
+                    "execValue": "8.435",
+                    "isMaker": False,
+                    "feeRate": "0.0006",
+                    "tradeIv": "",
+                    "markIv": "",
+                    "blockTradeId": "",
+                    "markPrice": "0.3391",
+                    "indexPrice": "",
+                    "underlyingPrice": "",
+                    "leavesQty": "0",
+                    "orderId": order.exchange_order_id,
+                    "orderLinkId": order.client_order_id,
+                    "orderPrice": "0.3207",
+                    "orderQty": "25",
+                    "orderType": "Market",
+                    "stopOrderType": "UNKNOWN",
+                    "side": "Sell",
+                    "execTime": "1672364174443",
+                    "isLeverage": "0",
+                    "closedSize": ""
+                }
+            ]
         }
+        trade_data = trade_event_message["data"][0]
 
-        filled_event = {
-            "e": "ticketInfo",
-            "E": "1621912542359",
-            "s": self.ex_trading_pair,
-            "q": "0.001639",
-            "t": "1621912542314",
-            "p": "61000.0",
-            "T": "899062000267837441",
-            "o": "899048013515737344",
-            "c": "1621910874883",
-            "O": "899062000118679808",
-            "a": "10043",
-            "A": "10024",
-            "m": True
+        order_event_message = {
+            "id": "5923240c6880ab-c59f-420b-9adb-3639adc9dd90",
+            "topic": "order",
+            "creationTime": 1672364262474,
+            "data": [
+                {
+                    "symbol": order.trading_pair,
+                    "orderId": order.exchange_order_id,
+                    "side": "Buy",
+                    "orderType": "Market",
+                    "cancelType": "UNKNOWN",
+                    "price": "72.5",
+                    "qty": "1",
+                    "orderIv": "",
+                    "timeInForce": "IOC",
+                    "orderStatus": "Filled",
+                    "orderLinkId": order.client_order_id,
+                    "lastPriceOnCreated": "",
+                    "reduceOnly": False,
+                    "leavesQty": "",
+                    "leavesValue": "",
+                    "cumExecQty": "1",
+                    "cumExecValue": "75",
+                    "avgPrice": "75",
+                    "blockTradeId": "",
+                    "positionIdx": 0,
+                    "cumExecFee": "0.358635",
+                    "createdTime": "1672364262444",
+                    "updatedTime": "1672364262457",
+                    "rejectReason": "EC_NoError",
+                    "stopOrderType": "",
+                    "tpslMode": "",
+                    "triggerPrice": "",
+                    "takeProfit": "",
+                    "stopLoss": "",
+                    "tpTriggerBy": "",
+                    "slTriggerBy": "",
+                    "tpLimitPrice": "",
+                    "slLimitPrice": "",
+                    "triggerDirection": 0,
+                    "triggerBy": "",
+                    "closeOnTrigger": False,
+                    "category": "option",
+                    "placeType": "price",
+                    "smpType": "None",
+                    "smpGroup": 0,
+                    "smpOrderId": "",
+                    "feeCurrency": ""
+                }
+            ]
         }
 
         mock_queue = AsyncMock()
-        mock_queue.get.side_effect = [event_message, filled_event, asyncio.CancelledError]
+        mock_queue.get.side_effect = [trade_event_message, order_event_message, asyncio.CancelledError]
         self.exchange._user_stream_tracker._user_stream = mock_queue
 
         try:
@@ -1505,12 +1732,13 @@ class TestBybitExchange(unittest.TestCase):
         self.assertEqual(order.trading_pair, fill_event.trading_pair)
         self.assertEqual(order.trade_type, fill_event.trade_type)
         self.assertEqual(order.order_type, fill_event.order_type)
-        match_price = Decimal(event_message["L"])
-        match_size = Decimal(event_message["l"])
+        match_price = Decimal(trade_data["execPrice"])
+        match_size = Decimal(trade_data["execQty"])
         self.assertEqual(match_price, fill_event.price)
         self.assertEqual(match_size, fill_event.amount)
-        self.assertEqual([TokenAmount(amount=Decimal(event_message["n"]), token=(event_message["N"]))],
-                         fill_event.trade_fee.flat_fees)
+        self.assertEqual(
+            [TokenAmount(amount=Decimal(trade_data["execFee"]), token=order.quote_asset)],
+            fill_event.trade_fee.flat_fees)
 
         buy_event: BuyOrderCompletedEvent = self.buy_order_completed_logger.event_log[0]
         self.assertEqual(self.exchange.current_timestamp, buy_event.timestamp)
@@ -1550,6 +1778,49 @@ class TestBybitExchange(unittest.TestCase):
             ]
         }
 
+        event_message = {
+            "id": "5923248e5d0ee3-faeb-4864-87e4-9cd63f785c1b",
+            "topic": "wallet",
+            "creationTime": 1690873065683,
+            "data": [
+                {
+                    "accountIMRate": "0.4782",
+                    "accountMMRate": "0.0151",
+                    "totalEquity": "19620.93864593",
+                    "totalWalletBalance": "18331.93856433",
+                    "totalMarginBalance": "18230.83251552",
+                    "totalAvailableBalance": "9511.52641225",
+                    "totalPerpUPL": "-101.10604881",
+                    "totalInitialMargin": "8719.30610327",
+                    "totalMaintenanceMargin": "277.05763376",
+                    "coin": [
+                        {
+                            "coin": self.base_asset,
+                            "free": "10000",
+                            "equity": "0",
+                            "usdValue": "0",
+                            "walletBalance": "10500",
+                            "availableToWithdraw": "0",
+                            "availableToBorrow": "1500000",
+                            "borrowAmount": "0",
+                            "accruedInterest": "0",
+                            "totalOrderIM": "0",
+                            "totalPositionIM": "0",
+                            "totalPositionMM": "0",
+                            "unrealisedPnl": "0",
+                            "cumRealisedPnl": "-1100.6552094",
+                            "bonus": "0",
+                            "collateralSwitch": True,
+                            "marginCollateral": True,
+                            "locked": "0"
+                        },
+                    ],
+                    "accountLTV": "0",
+                    "accountType": "UNIFIED"
+                }
+            ]
+        }
+
         mock_queue = AsyncMock()
         mock_queue.get.side_effect = [event_message, asyncio.CancelledError]
         self.exchange._user_stream_tracker._user_stream = mock_queue
@@ -1573,31 +1844,3 @@ class TestBybitExchange(unittest.TestCase):
             asyncio.CancelledError,
             self.async_run_with_timeout,
             self.exchange._user_stream_event_listener())
-
-    @patch("hummingbot.connector.exchange.bybit.bybit_exchange.BybitExchange._sleep")
-    def test_user_stream_logs_errors(self, _):
-        self.exchange._set_current_timestamp(1640780000)
-
-        incomplete_event = {
-            "e": "outboundAccountInfo",
-            "E": "1629969654753",
-            "T": True,
-            "W": True,
-            "D": True,
-        }
-
-        mock_queue = AsyncMock()
-        mock_queue.get.side_effect = [incomplete_event, asyncio.CancelledError]
-        self.exchange._user_stream_tracker._user_stream = mock_queue
-
-        try:
-            self.async_run_with_timeout(self.exchange._user_stream_event_listener())
-        except asyncio.CancelledError:
-            pass
-
-        self.assertTrue(
-            self._is_logged(
-                "ERROR",
-                "Unexpected error in user stream listener loop."
-            )
-        )

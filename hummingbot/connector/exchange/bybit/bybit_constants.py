@@ -7,101 +7,117 @@ HBOT_ORDER_ID_PREFIX = "BYBIT-"
 MAX_ORDER_ID_LEN = 32
 HBOT_BROKER_ID = "Hummingbot"
 
-SIDE_BUY = "BUY"
-SIDE_SELL = "SELL"
+SIDE_BUY = "Buy"
+SIDE_SELL = "Sell"
 
 TIME_IN_FORCE_GTC = "GTC"
 # Base URL
 REST_URLS = {"bybit_main": "https://api.bybit.com",
              "bybit_testnet": "https://api-testnet.bybit.com"}
 
-WSS_V1_PUBLIC_URL = {"bybit_main": "wss://stream.bybit.com/spot/quote/ws/v1",
-                     "bybit_testnet": "wss://stream-testnet.bybit.com/spot/quote/ws/v1"}
+WSS_PUBLIC_URL = {"bybit_main": "wss://stream.bybit.com/v5/public/spot",
+                  "bybit_testnet": "wss://stream-testnet.bybit.com/v5/public/spot"}
 
-WSS_PRIVATE_URL = {"bybit_main": "wss://stream.bybit.com/spot/ws",
-                   "bybit_testnet": "wss://stream-testnet.bybit.com/spot/ws"}
+WSS_PRIVATE_URL = {"bybit_main": "wss://stream.bybit.com/v5/private",
+                   "bybit_testnet": "wss://stream-testnet.bybit.com/v5/private"}
+
+# Websocket public topics
+WS_ORDERBOOK_TOPIC = "orderbook"
+WS_TRADE_TOPIC = "publicTrade"
+
+# Websocket private topics
+WS_EXECUTION_TOPIC = "execution"
+WS_WALLET_TOPIC = "wallet"
+WS_ORDER_TOPIC = "order"
 
 # Websocket event types
-DIFF_EVENT_TYPE = "diffDepth"
+DIFF_EVENT_TYPE = "delta"
 TRADE_EVENT_TYPE = "trade"
-SNAPSHOT_EVENT_TYPE = "depth"
+SNAPSHOT_EVENT_TYPE = "snapshot"
 
 # Public API endpoints
-LAST_TRADED_PRICE_PATH = "/spot/quote/v1/ticker/price"
-EXCHANGE_INFO_PATH_URL = "/spot/v1/symbols"
-SNAPSHOT_PATH_URL = "/spot/quote/v1/depth"
-SERVER_TIME_PATH_URL = "/spot/v1/time"
+TICKER_PATH_URL = "/v5/market/tickers"
+INSTRUMENTS_INFO_PATH_URL = "/v5/market/instruments-info"
+SNAPSHOT_PATH_URL = "/v5/market/orderbook"
+SERVER_TIME_PATH_URL = "/v5/market/time"
 
 # Private API endpoints
-ACCOUNTS_PATH_URL = "/spot/v1/account"
-MY_TRADES_PATH_URL = "/spot/v1/myTrades"
+WALLET_BALANCE_PATH_URL = "/v5/account/wallet-balance"
+EXECUTION_HISTORY_PATH_URL = "/v5/execution/list"
 ORDER_PATH_URL = "/spot/v1/order"
+ORDER_GET_PATH_URL = "/v5/order/realtime"
+ORDER_CREATE_PATH_URL = "/v5/order/create"
+ORDER_CANCEL_PATH_URL = "/v5/order/cancel"
 
 # Order States
 ORDER_STATE = {
-    "PENDING": OrderState.PENDING_CREATE,
-    "NEW": OrderState.OPEN,
-    "PARTIALLY_FILLED": OrderState.PARTIALLY_FILLED,
-    "FILLED": OrderState.FILLED,
-    "PENDING_CANCEL": OrderState.PENDING_CANCEL,
-    "CANCELED": OrderState.CANCELED,
-    "REJECTED": OrderState.FAILED,
+    "Created": OrderState.PENDING_CREATE,
+    "New": OrderState.OPEN,
+    "PartiallyFilled": OrderState.PARTIALLY_FILLED,
+    "Filled": OrderState.FILLED,
+    "PartiallyFilledCanceled": OrderState.PENDING_CANCEL,
+    "Cancelled": OrderState.CANCELED,
+    "Rejected": OrderState.FAILED,
 }
 
-WS_HEARTBEAT_TIME_INTERVAL = 30
+WS_HEARTBEAT_TIME_INTERVAL = 20
 
 # Rate Limit Type
-REQUEST_GET = "GET"
-REQUEST_GET_BURST = "GET_BURST"
-REQUEST_GET_MIXED = "GET_MIXED"
-REQUEST_POST = "POST"
-REQUEST_POST_BURST = "POST_BURST"
-REQUEST_POST_MIXED = "POST_MIXED"
+SHARED_LIMIT = "SHARED"
 
 # Rate Limit Max request
-
-MAX_REQUEST_GET = 6000
-MAX_REQUEST_GET_BURST = 70
-MAX_REQUEST_GET_MIXED = 400
-MAX_REQUEST_POST = 2400
-MAX_REQUEST_POST_BURST = 50
-MAX_REQUEST_POST_MIXED = 270
+SHARED_MAX_REQUEST = 120
+SPOT_DEFAULT_MAX_REQUEST = 20
 
 # Rate Limit time intervals
-TWO_MINUTES = 120
 ONE_SECOND = 1
-SIX_SECONDS = 6
-ONE_DAY = 86400
+FIVE_SECONDS = 5
+ONE_MINUTES = 60
 
 RATE_LIMITS = {
     # General
-    RateLimit(limit_id=REQUEST_GET, limit=MAX_REQUEST_GET, time_interval=TWO_MINUTES),
-    RateLimit(limit_id=REQUEST_GET_BURST, limit=MAX_REQUEST_GET_BURST, time_interval=ONE_SECOND),
-    RateLimit(limit_id=REQUEST_GET_MIXED, limit=MAX_REQUEST_GET_MIXED, time_interval=SIX_SECONDS),
-    RateLimit(limit_id=REQUEST_POST, limit=MAX_REQUEST_POST, time_interval=TWO_MINUTES),
-    RateLimit(limit_id=REQUEST_POST_BURST, limit=MAX_REQUEST_POST_BURST, time_interval=ONE_SECOND),
-    RateLimit(limit_id=REQUEST_POST_MIXED, limit=MAX_REQUEST_POST_MIXED, time_interval=SIX_SECONDS),
+    # All HTTP Apis share 120/5s budget
+    RateLimit(limit_id=SHARED_LIMIT, limit=SHARED_MAX_REQUEST, time_interval=FIVE_SECONDS),
+
     # Linked limits
-    RateLimit(limit_id=LAST_TRADED_PRICE_PATH, limit=MAX_REQUEST_GET, time_interval=TWO_MINUTES,
-              linked_limits=[LinkedLimitWeightPair(REQUEST_GET, 1), LinkedLimitWeightPair(REQUEST_GET_BURST, 1),
-                             LinkedLimitWeightPair(REQUEST_GET_MIXED, 1)]),
-    RateLimit(limit_id=EXCHANGE_INFO_PATH_URL, limit=MAX_REQUEST_GET, time_interval=TWO_MINUTES,
-              linked_limits=[LinkedLimitWeightPair(REQUEST_GET, 1), LinkedLimitWeightPair(REQUEST_GET_BURST, 1),
-                             LinkedLimitWeightPair(REQUEST_GET_MIXED, 1)]),
-    RateLimit(limit_id=SNAPSHOT_PATH_URL, limit=MAX_REQUEST_GET, time_interval=TWO_MINUTES,
-              linked_limits=[LinkedLimitWeightPair(REQUEST_GET, 1), LinkedLimitWeightPair(REQUEST_GET_BURST, 1),
-                             LinkedLimitWeightPair(REQUEST_GET_MIXED, 1)]),
-    RateLimit(limit_id=SERVER_TIME_PATH_URL, limit=MAX_REQUEST_GET, time_interval=TWO_MINUTES,
-              linked_limits=[LinkedLimitWeightPair(REQUEST_GET, 1), LinkedLimitWeightPair(REQUEST_GET_BURST, 1),
-                             LinkedLimitWeightPair(REQUEST_GET_MIXED, 1)]),
-    RateLimit(limit_id=ORDER_PATH_URL, limit=MAX_REQUEST_GET, time_interval=TWO_MINUTES,
-              linked_limits=[LinkedLimitWeightPair(REQUEST_POST, 1), LinkedLimitWeightPair(REQUEST_POST_BURST, 1),
-                             LinkedLimitWeightPair(REQUEST_POST_MIXED, 1)]),
-    RateLimit(limit_id=ACCOUNTS_PATH_URL, limit=MAX_REQUEST_GET, time_interval=TWO_MINUTES,
-              linked_limits=[LinkedLimitWeightPair(REQUEST_POST, 1), LinkedLimitWeightPair(REQUEST_POST_BURST, 1),
-                             LinkedLimitWeightPair(REQUEST_POST_MIXED, 1)]),
-    RateLimit(limit_id=MY_TRADES_PATH_URL, limit=MAX_REQUEST_GET, time_interval=TWO_MINUTES,
-              linked_limits=[LinkedLimitWeightPair(REQUEST_POST, 1), LinkedLimitWeightPair(REQUEST_POST_BURST, 1),
-                             LinkedLimitWeightPair(REQUEST_POST_MIXED, 1)]),
+    # Public APIs
+    RateLimit(
+        limit_id=TICKER_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+    RateLimit(
+        limit_id=INSTRUMENTS_INFO_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+    RateLimit(
+        limit_id=SERVER_TIME_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+    RateLimit(
+        limit_id=SNAPSHOT_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+
+    # Private APIs
+    RateLimit(
+        limit_id=WALLET_BALANCE_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+    RateLimit(
+        limit_id=EXECUTION_HISTORY_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+    RateLimit(
+        limit_id=ORDER_GET_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+    RateLimit(
+        limit_id=ORDER_CREATE_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
+    RateLimit(
+        limit_id=ORDER_CANCEL_PATH_URL, limit=SPOT_DEFAULT_MAX_REQUEST, time_interval=ONE_SECOND,
+        linked_limits=[LinkedLimitWeightPair(SHARED_LIMIT)],
+    ),
 
 }
