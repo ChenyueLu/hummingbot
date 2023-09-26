@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-import time
 from collections import OrderedDict
 from typing import Dict
 from urllib.parse import urlencode
@@ -89,6 +88,3 @@ class BybitAuth(AuthBase):
             "args": [self.api_key, expires, signature]
         }
         return auth_message
-
-    def _time(self):
-        return time.time()
