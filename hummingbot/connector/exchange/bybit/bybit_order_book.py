@@ -6,12 +6,11 @@ from hummingbot.core.data_type.order_book_message import OrderBookMessage, Order
 
 
 class BybitOrderBook(OrderBook):
-    # TODO: should change order datasource parse logic as every message may contains multiple snapshot
     @classmethod
-    def snapshot_message_from_exchange_websocket(cls,
-                                                 msg: Dict[str, any],
-                                                 timestamp: float,
-                                                 metadata: Optional[Dict] = None) -> OrderBookMessage:
+    def snapshot_message_from_exchange(cls,
+                                       msg: Dict[str, any],
+                                       timestamp: float,
+                                       metadata: Optional[Dict] = None) -> OrderBookMessage:
         """
         Creates a snapshot message with the order book snapshot message
         :param msg: the response from the exchange when requesting the order book snapshot
@@ -28,28 +27,6 @@ class BybitOrderBook(OrderBook):
             "asks": msg["a"]
         }, timestamp=timestamp)
 
-    @classmethod
-    def snapshot_message_from_exchange_rest(cls,
-                                            msg: Dict[str, any],
-                                            timestamp: float,
-                                            metadata: Optional[Dict] = None) -> OrderBookMessage:
-        """
-        Creates a snapshot message with the order book snapshot message
-        :param msg: the response from the exchange when requesting the order book snapshot
-        :param timestamp: the snapshot timestamp
-        :param metadata: a dictionary with extra information to add to the snapshot data
-        :return: a snapshot message with the snapshot information received from the exchange
-        """
-        if metadata:
-            msg.update(metadata)
-        return OrderBookMessage(OrderBookMessageType.SNAPSHOT, {
-            "trading_pair": msg["trading_pair"],
-            "update_id": msg["u"],
-            "bids": msg["b"],
-            "asks": msg["a"]
-        }, timestamp=timestamp)
-
-    # TODO: should change order datasource parse logic as every message may contains multiple diff
     @classmethod
     def diff_message_from_exchange(cls,
                                    msg: Dict[str, any],
@@ -71,7 +48,6 @@ class BybitOrderBook(OrderBook):
             "asks": msg["a"]
         }, timestamp=timestamp)
 
-    # TODO: should change order datasource parse logic as every message may contains multiple trades
     @classmethod
     def trade_message_from_exchange(cls, msg: Dict[str, any], metadata: Optional[Dict] = None):
         """
