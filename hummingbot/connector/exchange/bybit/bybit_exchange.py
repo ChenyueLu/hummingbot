@@ -101,7 +101,10 @@ class BybitExchange(ExchangePyBase):
     async def _make_trading_rules_request(self) -> Any:
         exchange_info = await self._api_get(
             path_url=self.trading_rules_request_path,
-            params={"category": "spot"},
+            params={
+                "category": "spot",
+                "status": "Trading"
+            },
         )
         return exchange_info
 
@@ -295,7 +298,7 @@ class BybitExchange(ExchangePyBase):
         """
         trading_pair_rules = exchange_info_dict.get("result", {}).get("list", [])
         retval = []
-        for rule in trading_pair_rules:
+        for rule in filter(bybit_utils.is_exchange_information_valid, trading_pair_rules):
             try:
                 trading_pair = await self.trading_pair_associated_to_exchange_symbol(
                     symbol=rule.get("symbol"))
