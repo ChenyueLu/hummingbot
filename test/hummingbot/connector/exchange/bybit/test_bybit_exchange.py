@@ -31,6 +31,7 @@ from hummingbot.core.event.events import (
     SellOrderCreatedEvent,
 )
 from hummingbot.core.network_iterator import NetworkStatus
+from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 
 
 class TestBybitExchange(unittest.TestCase):
@@ -158,10 +159,13 @@ class TestBybitExchange(unittest.TestCase):
             )
         }
 
-    def _validate_auth_credentials_present(self, request_call_tuple: NamedTuple):
+    def _validate_auth_credentials_present(
+            self, request_call_tuple: NamedTuple, http_method: RESTMethod = RESTMethod.GET,
+    ):
         request_headers = request_call_tuple.kwargs["headers"]
+        expected_content_type = "application/json" if http_method != RESTMethod.GET else "application/x-www-form-urlencoded"
         self.assertIn("Content-Type", request_headers)
-        self.assertEqual("application/x-www-form-urlencoded", request_headers["Content-Type"])
+        self.assertEqual(expected_content_type, request_headers["Content-Type"])
         self.assertIn("X-BAPI-API-KEY", request_headers)
         self.assertIn("X-BAPI-TIMESTAMP", request_headers)
         self.assertIn("X-BAPI-RECV-WINDOW", request_headers)
@@ -378,14 +382,14 @@ class TestBybitExchange(unittest.TestCase):
 
         order_request = next(((key, value) for key, value in mock_api.requests.items()
                               if key[1].human_repr().startswith(url)))
-        self._validate_auth_credentials_present(order_request[1][0])
-        request_params = order_request[1][0].kwargs["params"]
-        self.assertEqual(self.ex_trading_pair, request_params["symbol"])
-        self.assertEqual("Buy", request_params["side"])
-        self.assertEqual("Limit", request_params["orderType"])
-        self.assertEqual(Decimal("100"), Decimal(request_params["qty"]))
-        self.assertEqual(Decimal("10000"), Decimal(request_params["price"]))
-        self.assertEqual("OID1", request_params["orderLinkId"])
+        self._validate_auth_credentials_present(order_request[1][0], RESTMethod.POST)
+        request_body = json.loads(order_request[1][0].kwargs["data"])
+        self.assertEqual(self.ex_trading_pair, request_body["symbol"])
+        self.assertEqual("Buy", request_body["side"])
+        self.assertEqual("Limit", request_body["orderType"])
+        self.assertEqual(Decimal("100"), Decimal(request_body["qty"]))
+        self.assertEqual(Decimal("10000"), Decimal(request_body["price"]))
+        self.assertEqual("OID1", request_body["orderLinkId"])
 
         self.assertIn("OID1", self.exchange.in_flight_orders)
         create_event: BuyOrderCreatedEvent = self.buy_order_created_logger.event_log[0]
@@ -442,14 +446,14 @@ class TestBybitExchange(unittest.TestCase):
 
         order_request = next(((key, value) for key, value in mock_api.requests.items()
                               if key[1].human_repr().startswith(url)))
-        self._validate_auth_credentials_present(order_request[1][0])
-        request_data = order_request[1][0].kwargs["params"]
-        self.assertEqual(self.ex_trading_pair, request_data["symbol"])
-        self.assertEqual("Sell", request_data["side"])
-        self.assertEqual("Market", request_data["orderType"])
-        self.assertEqual(Decimal("100"), Decimal(request_data["qty"]))
-        self.assertEqual("OID1", request_data["orderLinkId"])
-        self.assertNotIn("price", request_data)
+        self._validate_auth_credentials_present(order_request[1][0], RESTMethod.POST)
+        request_body = json.loads(order_request[1][0].kwargs["data"])
+        self.assertEqual(self.ex_trading_pair, request_body["symbol"])
+        self.assertEqual("Sell", request_body["side"])
+        self.assertEqual("Market", request_body["orderType"])
+        self.assertEqual(Decimal("100"), Decimal(request_body["qty"]))
+        self.assertEqual("OID1", request_body["orderLinkId"])
+        self.assertNotIn("price", request_body)
 
         self.assertIn("OID1", self.exchange.in_flight_orders)
         create_event: SellOrderCreatedEvent = self.sell_order_created_logger.event_log[0]
@@ -493,7 +497,7 @@ class TestBybitExchange(unittest.TestCase):
 
         order_request = next(((key, value) for key, value in mock_api.requests.items()
                               if key[1].human_repr().startswith(url)))
-        self._validate_auth_credentials_present(order_request[1][0])
+        self._validate_auth_credentials_present(order_request[1][0], RESTMethod.POST)
 
         self.assertNotIn("OID1", self.exchange.in_flight_orders)
         self.assertEquals(0, len(self.buy_order_created_logger.event_log))
@@ -615,7 +619,7 @@ class TestBybitExchange(unittest.TestCase):
 
         cancel_request = next(((key, value) for key, value in mock_api.requests.items()
                                if key[1].human_repr().startswith(url)))
-        self._validate_auth_credentials_present(cancel_request[1][0])
+        self._validate_auth_credentials_present(cancel_request[1][0], RESTMethod.POST)
 
         cancel_event: OrderCancelledEvent = self.order_cancelled_logger.event_log[0]
         self.assertEqual(self.exchange.current_timestamp, cancel_event.timestamp)
@@ -666,7 +670,7 @@ class TestBybitExchange(unittest.TestCase):
 
         cancel_request = next(((key, value) for key, value in mock_api.requests.items()
                                if key[1].human_repr().startswith(url)))
-        self._validate_auth_credentials_present(cancel_request[1][0])
+        self._validate_auth_credentials_present(cancel_request[1][0], RESTMethod.POST)
 
         self.assertEquals(0, len(self.order_cancelled_logger.event_log))
 
