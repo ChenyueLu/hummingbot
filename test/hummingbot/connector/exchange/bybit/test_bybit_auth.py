@@ -74,7 +74,7 @@ class BybitAuthTests(TestCase):
         request = RESTRequest(
             method=RESTMethod.POST,
             url="https://test.url/api/endpoint",
-            data=params,
+            data=json.dumps(params),
             is_auth_required=True,
             throttler_limit_id="/api/endpoint"
         )
@@ -118,7 +118,7 @@ class BybitAuthTests(TestCase):
         if request_method == RESTMethod.GET:
             payload_str = urlencode(request_params)
         else:
-            payload_str = json.dumps(request_params)
+            payload_str = request_params
 
         headers = {}
 
